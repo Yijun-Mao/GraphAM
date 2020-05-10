@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
+from torch.autograd import Variable
 
 import torchvision
 import torchvision.transforms as transforms
@@ -13,11 +14,13 @@ from torch.utils.data import Dataset, DataLoader
 import os
 import numpy as np
 
-from models import *
+from models.resnet import ResNet18
 import sys
 sys.path.append('../')
 from config import get_args
 from utils.utils import progress_bar
+from utils.makedataset import make_cnn_dataset
+from utils.dataset import EncoderData
 
 class ConnetClassify(nn.Module):
     '''
@@ -38,17 +41,18 @@ class ConnetClassify(nn.Module):
         self.linear4 = nn.Linear(hidden_units, hidden_units)
         self.linear5 = nn.Linear(hidden_units, 2)  # binary classification, connect or not
     
-    def forward(self, x):
+    def forward(self, x, softmax=False):
         out = self.linear1(x)
-        out = F.ReLU(out)
+        out = F.relu(out)
         out = self.linear2(out)
-        out = F.ReLU(out)
+        out = F.relu(out)
         out = self.linear3(out)
-        out = F.ReLU(out)
+        out = F.relu(out)
         out = self.linear4(out)
-        out = F.ReLU(out)
+        out = F.relu(out)
         out = self.linear5(out)
-        out = F.softmax(out)
+        if softmax:
+            out = F.softmax(out)
         return out
 
 def makeCNN(cnn_backbone='resnet18'):
@@ -70,6 +74,7 @@ def makeCNN(cnn_backbone='resnet18'):
     else:
         raise AssertionError(
             'The backbone is not implemented currently. It should be in [Resnet18, Resnet34, Resnet50, Resnet101, Resnet152, VGG].')
+    
     return cnn
 
 class Encoder(object):
@@ -88,8 +93,8 @@ class Encoder(object):
         self.cnn = makeCNN(self.cnn_backbone)
         self.cnn = self.cnn.to(self.device)
         self.connect = ConnetClassify(self.cnn.feature_size, args.hidden_units).to(self.device)
-        # if args.finetune:
-        #     self.initialize()
+        if args.finetune:
+            self.initialize()
         
         if torch.cuda.device_count() > 1:
             self.cnn = nn.DataParallel(self.cnn, device_ids=[int(i) for i in args.gpu])
@@ -102,13 +107,13 @@ class Encoder(object):
         :param now_input: current input image
         return pre_obs: the observation extracted from previous image
         return now_obs: the observation extracted from current image
-        return p_connect: the probability of the connection
+        return p_connect: the output of the connection (no softmax)
         '''
         pre_input = pre_input.to(self.device)
         now_input = now_input.to(self.device)
 
         pre_obs = self.cnn(pre_input)
-        now_obs = self.ccnn(now_input)
+        now_obs = self.cnn(now_input)
         p_connect = self.connect(torch.cat([pre_obs, now_obs],dim=-1))
 
         return pre_obs, now_obs, p_connect
@@ -124,10 +129,36 @@ class Encoder(object):
         now_input = img.to(self.device)
         observ = observ.to(self.device)
 
-        now_obs = self.ccnn(now_input)
-        p_connect = self.connect(torch.cat([observ, now_obs], dim=-1))
+        now_obs = self.cnn(now_input)
+        p_connect = self.connect(torch.cat([observ, now_obs], dim=-1), softmax=True)
         
         return now_obs, p_connect
+
+    def getobservefromimg(self, img):
+        '''
+        Get the observe from the input image
+        param img: the input image which should have the size: 3xwidthxhegiht
+        return feature: the observe extracted by the CNN
+        '''
+        img = torch.Tensor(img)
+        now_input = img.to(self.device)
+        now_obs = self.cnn(now_input)
+        return now_obs
+
+    def predictconnect(self, obs1, obs2):
+        '''
+        Predict the probability of the connection
+        :param obs1: the first observation 
+        :param obs2: the second observation
+        return p_connect: the probability of the connection
+        '''
+        # obs1 = Variable(torch.from_numpy(obs1))
+        # obs1 = Variable(torch.from_numpy(obs2))
+        obs1 = torch.from_numpy(obs1).to(self.device)
+        obs2 = torch.from_numpy(obs2).to(self.device)
+        p_connect = self.connect(torch.cat([obs1, obs2], dim=-1), softmax=True)
+        return torch.squeeze(p_connect).cpu().data.numpy()
+
 
     def save_model(self, path):
         '''
@@ -136,6 +167,7 @@ class Encoder(object):
         '''
         if not os.path.exists(path):
             os.makedirs(path)
+        print("Saving weights in "+path)
         torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn.pt'))
         torch.save(self.connect.state_dict(), os.path.join(path, 'connect.pt'))
 
@@ -149,6 +181,7 @@ class Encoder(object):
         assert os.path.isfile(os.path.join(
             path, 'connect.pt')), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
         
+        print("Loading weights from "+ path)
         self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn.pt')))
         self.connect.load_state_dict(torch.load(os.path.join(path, 'connect.pt')))
     
@@ -156,16 +189,39 @@ class Encoder(object):
         '''
         Initialize the cnn networks from pretrained model in ImageNet
         '''
-        raise NotImplementedError
+        print('Loading the pretrained model from Imagenet')
+        if self.cnn_backbone == 'resnet18':
+            model = torchvision.models.resnet18(pretrained=True)
+        else:
+            model = torchvision.models.resnet18(pretrained=True)
+        pretrained_dict = model.state_dict()
+        model_dict = self.cnn.state_dict()
+        pretrained_dict =  {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        model_dict.update(pretrained_dict)
+        self.cnn.load_state_dict(model_dict)
+
+    def mix_grad(self):
+        '''
+        Mix the gradient from the two cnns
+        '''
+        with torch.no_grad():
+            for (name, param), (name2, param2) in zip(self.cnn1.named_parameters(), self.cnn2.named_parameters()):
+                if param.requires_grad:
+                    param.grad = (param.grad + param2.grad) / 2
+        
+
+    def equai_weights(self):
+        model_dict = self.cnn1.state_dict()
+        self.cnn2.load_state_dict(model_dict)
 
 
-def train(args, encoder, trainloader, testloader):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def trainEncoder(args, encoder, trainloader, testloader, device):
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam([{'params': encoder.cnn.parameters()}, {
-                           'params': encoder.connect.parameters()}], lr=args.encoder_lr)
+    optimizer = optim.Adam([{'params': encoder.cnn.parameters(), 'lr':args.encoder_lr*0.1}, {
+                           'params': encoder.connect.parameters(), 'lr':args.encoder_lr}])
+    # optimizer = optim.Adam([{'params': encoder.connect.parameters()}], lr=args.encoder_lr)
     optimizer.zero_grad()
-    encoder.cnn.train()
+    # encoder.cnn.train()
     encoder.connect.train()
     best_accuracy = 0
     for epoch in range(args.encoder_epoch):
@@ -176,11 +232,13 @@ def train(args, encoder, trainloader, testloader):
         for batch_idx, (img1, img2, targets) in enumerate(trainloader):
             # targets: 0 connect, 1 not connect
             targets = targets.to(device)
-            outputs = encoder.predconnectfromimg(img1, img2)
+            _, _, outputs = encoder.predconnectfromimg(img1, img2)
             loss = criterion(outputs, targets)
             loss.backward()
+            # encoder.mix_grad()
             optimizer.step()
             optimizer.zero_grad()
+            # encoder.equai_weights()
 
             train_loss += loss.item()
             _, predicted = outputs.max(1)
@@ -195,7 +253,8 @@ def train(args, encoder, trainloader, testloader):
         test_total = 0
         for batch_idx, (img1, img2, targets) in enumerate(testloader):
             targets = targets.to(device)
-            outputs = encoder.predconnectfromimg(img1, img2)
+            with torch.no_grad():
+                _,_,outputs = encoder.predconnectfromimg(img1, img2)
             loss = criterion(outputs, targets)
 
             test_loss += loss.item()
@@ -208,22 +267,22 @@ def train(args, encoder, trainloader, testloader):
 
         if best_accuracy < (test_correct/test_total):
             best_accuracy = (test_correct/test_total)
-            encoder.save_model(os.path.join(args.out_dir, 'best'))
+            encoder.save_model(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'encoder_new', 'best'))
         else:
-            encoder.save_model(os.path.join(args.out_dir, 'latest'))
+            encoder.save_model(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'encoder_new', 'latest'))
     
     return encoder
 
 
-def test(args, encoder, testloader):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def testEncoder(args, encoder, testloader, device):
     test_loss = 0
     test_correct = 0
     test_total = 0
     criterion = nn.CrossEntropyLoss()
     for batch_idx, (img1, img2, targets) in enumerate(testloader):
         targets = targets.to(device)
-        outputs = encoder.predconnectfromimg(img1, img2)
+        with torch.no_grad():
+            _,_,outputs = encoder.predconnectfromimg(img1, img2)
         loss = criterion(outputs, targets)
 
         test_loss += loss.item()
@@ -234,6 +293,36 @@ def test(args, encoder, testloader):
                      % (test_loss/(batch_idx+1), 100.*test_correct/test_total, test_correct, test_total))
 
 
+def main(args):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    encoder = Encoder(args)
+    if not os.path.isfile(os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'training.txt')):
+        print('The training set and testing set are not divided. Make them now')
+        make_cnn_dataset(args.path_images, args.path_train_test, conn_max=args.connect_max, conn_min=args.connect_min, data_num=10000)
+    
+    trainloader = DataLoader(EncoderData(args.path_images, os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'training.txt'), 
+                            target_transform=transforms.Compose([transforms.Resize(args.img_width),
+                                                                transforms.ToTensor(),
+                                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])),
+                            batch_size=args.encoder_batchsize, shuffle=True, num_workers=4)
+
+    testloader = DataLoader(EncoderData(args.path_images, os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'testing.txt'), 
+                            target_transform=transforms.Compose([transforms.Resize(args.img_width),
+                                                                transforms.ToTensor(),
+                                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])),
+                            batch_size=args.encoder_batchsize, shuffle=False, num_workers=4)
+
+    if args.test_encoder:
+        encoder.load_model(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'encoder_new', 'best'))
+        testEncoder(args, encoder, testloader, device)
+    else:
+        if args.load_encoder:
+            encoder.load_model(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'encoder_new', 'best'))
+        trainEncoder(args, encoder, trainloader, testloader, device)
+    
+
+
+
 if __name__ == '__main__':
     args = get_args()
     gpus = ''
@@ -241,3 +330,5 @@ if __name__ == '__main__':
         gpus+=str(ids)
         gpus+=','
     os.environ["CUDA_VISIBLE_DEVICES"] = gpus
+    
+    main(args)

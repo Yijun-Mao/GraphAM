@@ -10,18 +10,27 @@ class GAT(nn.Module):
         super(GAT, self).__init__()
         self.dropout = dropout
 
-        self.attentions = [GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True) for _ in range(nheads)]
-        for i, attention in enumerate(self.attentions):
-            self.add_module('attention_{}'.format(i), attention)
+        self.attentions1 = [GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True) for _ in range(nheads)]
+        for i, attention in enumerate(self.attentions1):
+            self.add_module('attention1_{}'.format(i), attention)
 
-        self.out_att = GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
+        self.attentions2 = [GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True) for _ in range(nheads)]
+        for i, attention in enumerate(self.attentions2):
+            self.add_module('attention2_{}'.format(i), attention)
+        # self.out_att = GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
 
     def forward(self, x, adj):
         x = F.dropout(x, self.dropout, training=self.training)
-        x = torch.cat([att(x, adj) for att in self.attentions], dim=1)
+        x = [att(x, adj) for att in self.attentions1]
+        x = torch.mean(x, dim=0)
         x = F.dropout(x, self.dropout, training=self.training)
-        x = F.elu(self.out_att(x, adj))
-        return F.log_softmax(x, dim=1)
+        x = F.elu(x)
+        
+        x = [att(x, adj) for att in self.attentions2]
+        x = torch.mean(x, dim=0)
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = F.elu(x)
+        return x
 
 
 class SpGAT(nn.Module):
