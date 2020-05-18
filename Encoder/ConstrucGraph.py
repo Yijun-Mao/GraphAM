@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 sys.path.append('../')
 from config import get_args
-from utils.utils import progress_bar
+from utils.utils import progress_bar, cos_sim
 from utils.makedataset import make_cnn_dataset
 from utils.dataset import EncoderData, SimulateConstructGraphData
 from utils.visualizegraphinmap import draw_node_edge
@@ -27,6 +27,8 @@ class ConstructGraph(object):
         super(ConstructGraph).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.encoder = Encoder(args)
+        self.encoder.connect.eval()
+        self.encoder.cnn.eval()
         self.feature_size = self.encoder.cnn.feature_size
         self.args = args
 
@@ -43,24 +45,30 @@ class ConstructGraph(object):
         :param img: the input image which should have the size: 3 x args.width x args.height
         :param searchall: if True, search all nodes to find all the connection. If False, get the first connecting node.(search start from the last one)
         '''
-        feature_node = self.encoder.getobservefromimg(img)
+        feature_node = self.encoder.getobservefromimg(img).cpu().data.numpy()
         if len(self.all_node) == 0:
             # There is no node before, construct the first node
-            self.all_node.append(feature_node.cpu().data.numpy())
+            self.all_node.append(feature_node)
             return True
         else:
             tmp_edges = {}
             idx = list(range(len(self.all_node)))[::-1]
             for i in idx:
-                p_connect = self.encoder.predictconnect(self.all_node[i], feature_node.cpu().data.numpy())
-                
+                p_connect = self.encoder.predictconnect(self.all_node[i], feature_node)
+
                 if p_connect[1] >= self.args.connect_threshold:
-                    if searchall:
-                        tmp_edges[p_connect[1]] = [i, len(self.all_node)]
-                    else:
-                        self.all_node.append(feature_node.cpu().data.numpy())
-                        self.all_edge.append([i, len(self.all_node)])
-                        return True
+                    cosine_similarity = cos_sim(self.all_node[i], feature_node)
+                    # Only when the cosine_similarity is smaller than threshold we can view these two image as different node, not the same node
+                    
+                    if cosine_similarity < self.args.cos_sim_threshold:
+                        # print(cosine_similarity)
+                        # print()
+                        if searchall:
+                            tmp_edges[p_connect[1]] = [i, len(self.all_node)]
+                        else:
+                            self.all_node.append(feature_node)
+                            self.all_edge.append([i, len(self.all_node)-1])
+                            return True
             
             if len(tmp_edges) > 0:
                 tmp_edge_sort = sorted(tmp_edges.items(), key=lambda x:x[0], reverse=True)
@@ -68,7 +76,7 @@ class ConstructGraph(object):
                     tmp_edge_sort = tmp_edge_sort[0:self.args.constructgraph_topK]
                 for p_edges in tmp_edge_sort:
                     self.all_edge.append(p_edges[1])
-                self.all_node.append(feature_node.cpu().data.numpy())
+                self.all_node.append(feature_node)
 
                 return True
 
@@ -152,7 +160,7 @@ def SimulateGraph(args):
         simulateloader.set_description("Now get {} nodes, discard {} images".format(len(coords), n-len(coords)))
 
     makegraph.consgraph()
-    all_nodes, adjacent = makegraph.getgraph(sparse=False)
+    all_nodes, adjacent = makegraph.getgraph(sparse=True)
     assert len(all_nodes) == len(coords), "The nodes and the coords are not equal"
     print("There are {} nodes.".format(len(all_nodes)))
     makegraph.savegraph(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph'))

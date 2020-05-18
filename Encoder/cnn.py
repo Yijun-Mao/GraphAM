@@ -36,19 +36,27 @@ class ConnetClassify(nn.Module):
         self.hidden_units = hidden_units
 
         self.linear1 = nn.Linear(self.feature_size*2, hidden_units)
+        self.bn1 = nn.BatchNorm1d(hidden_units)
         self.linear2 = nn.Linear(hidden_units, hidden_units)
+        self.bn2 = nn.BatchNorm1d(hidden_units)
         self.linear3 = nn.Linear(hidden_units, hidden_units)
+        self.bn3 = nn.BatchNorm1d(hidden_units)
         self.linear4 = nn.Linear(hidden_units, hidden_units)
+        self.bn4 = nn.BatchNorm1d(hidden_units)
         self.linear5 = nn.Linear(hidden_units, 2)  # binary classification, connect or not
     
     def forward(self, x, softmax=False):
         out = self.linear1(x)
+        out = self.bn1(out)
         out = F.relu(out)
         out = self.linear2(out)
+        out = self.bn2(out)
         out = F.relu(out)
         out = self.linear3(out)
+        out = self.bn3(out)
         out = F.relu(out)
         out = self.linear4(out)
+        out = self.bn4(out)
         out = F.relu(out)
         out = self.linear5(out)
         if softmax:
@@ -93,6 +101,7 @@ class Encoder(object):
         self.cnn = makeCNN(self.cnn_backbone)
         self.cnn = self.cnn.to(self.device)
         self.connect = ConnetClassify(self.cnn.feature_size, args.hidden_units).to(self.device)
+        self.args = args
         if args.finetune:
             self.initialize()
         
@@ -108,6 +117,7 @@ class Encoder(object):
         return pre_obs: the observation extracted from previous image
         return now_obs: the observation extracted from current image
         return p_connect: the output of the connection (no softmax)
+        return cos_sim: the cosine similarity of two observation
         '''
         pre_input = pre_input.to(self.device)
         now_input = now_input.to(self.device)
@@ -115,8 +125,9 @@ class Encoder(object):
         pre_obs = self.cnn(pre_input)
         now_obs = self.cnn(now_input)
         p_connect = self.connect(torch.cat([pre_obs, now_obs],dim=-1))
+        cos_sim = F.cosine_similarity(pre_obs, now_obs)
 
-        return pre_obs, now_obs, p_connect
+        return pre_obs, now_obs, p_connect, cos_sim
 
     def predconnectfromobs(self, observ, img):
         '''
@@ -168,8 +179,8 @@ class Encoder(object):
         if not os.path.exists(path):
             os.makedirs(path)
         print("Saving weights in "+path)
-        torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn.pt'))
-        torch.save(self.connect.state_dict(), os.path.join(path, 'connect.pt'))
+        torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn_r{}.pt'.format(self.args.cos_sim_reg)))
+        torch.save(self.connect.state_dict(), os.path.join(path, 'connect_r{}.pt'.format(self.args.cos_sim_reg)))
 
     def load_model(self, path):
         '''
@@ -177,13 +188,13 @@ class Encoder(object):
         param path: the path of the folder which the weights are saved
         '''
         assert os.path.isfile(os.path.join(
-            path, 'cnn.pt')), '{} is not existed, please check the path'.format(os.path.join(path, 'cnn.pt'))
+            path, 'cnn_r{}.pt'.format(self.args.cos_sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'cnn.pt'))
         assert os.path.isfile(os.path.join(
-            path, 'connect.pt')), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
+            path, 'connect_r{}.pt'.format(self.args.cos_sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
         
         print("Loading weights from "+ path)
-        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn.pt')))
-        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect.pt')))
+        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_r{}.pt'.format(self.args.cos_sim_reg))))
+        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_r{}.pt'.format(self.args.cos_sim_reg))))
     
     def initialize(self):
         '''
@@ -217,36 +228,65 @@ class Encoder(object):
 
 def trainEncoder(args, encoder, trainloader, testloader, device):
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam([{'params': encoder.cnn.parameters(), 'lr':args.encoder_lr*0.1}, {
-                           'params': encoder.connect.parameters(), 'lr':args.encoder_lr}])
+    # optimizer = optim.Adam([{'params': encoder.cnn.parameters(), 'lr':args.encoder_lr*0.1}, {
+    #                        'params': encoder.connect.parameters(), 'lr':args.encoder_lr}])
     # optimizer = optim.Adam([{'params': encoder.connect.parameters()}], lr=args.encoder_lr)
-    optimizer.zero_grad()
-    # encoder.cnn.train()
+    cnn_optimizer = optim.Adam(encoder.cnn.parameters(), lr=args.encoder_lr*0.1)
+    connect_optimizer = optim.Adam(encoder.connect.parameters(), lr=args.encoder_lr)
+    cnn_optimizer.zero_grad()
+    connect_optimizer.zero_grad()
+
+    encoder.cnn.train()
     encoder.connect.train()
     best_accuracy = 0
     for epoch in range(args.encoder_epoch):
         print('\nEpoch: %d' % epoch)
-        train_loss = 0
+        c_train_loss = 0
+        cnn_train_loss = 0
         correct = 0
         total = 0
         for batch_idx, (img1, img2, targets) in enumerate(trainloader):
             # targets: 0 connect, 1 not connect
             targets = targets.to(device)
-            _, _, outputs = encoder.predconnectfromimg(img1, img2)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            # encoder.mix_grad()
-            optimizer.step()
-            optimizer.zero_grad()
-            # encoder.equai_weights()
+            _, _, outputs, cos_sim = encoder.predconnectfromimg(img1, img2)
 
-            train_loss += loss.item()
+            connect_optimizer.zero_grad()
+
+            connect_targets = targets.clone()
+            connect_targets[targets==-1] = 0
+            c_loss_pred = criterion(outputs, connect_targets)
+
             _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
+            outputs_soft = F.softmax(outputs)
 
-            progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+            if cos_sim[targets==-1].shape == torch.Size([0]):
+                c_loss = c_loss_pred.clone()
+            else:
+                c_loss_cos = torch.mean(cos_sim[targets==-1].mul(outputs_soft[targets==-1,1])) * args.cos_sim_reg
+                c_loss = c_loss_pred + c_loss_cos
+
+            c_loss.backward(retain_graph=True)
+            connect_optimizer.step()
+            connect_optimizer.zero_grad()
+
+            cnn_optimizer.zero_grad()
+            
+            # cnn_targets = targets.clone()
+            # cnn_targets[targets==-1] = 0
+            # cnn_loss = criterion(outputs, cnn_targets)
+
+            c_loss_pred.backward()
+            cnn_optimizer.step()
+            cnn_optimizer.zero_grad()
+
+            c_train_loss += c_loss_cos.item()
+            cnn_train_loss += c_loss_pred.item()
+            
+            total += targets.size(0)
+            correct += predicted.eq(connect_targets).sum().item()
+
+            progress_bar(batch_idx, len(trainloader), 'connect loss: %.3f | cnn loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (c_train_loss/(batch_idx+1), cnn_train_loss/(batch_idx+1), 100.*correct/total, correct, total))
         
         test_loss = 0
         test_correct = 0
@@ -254,13 +294,15 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
         for batch_idx, (img1, img2, targets) in enumerate(testloader):
             targets = targets.to(device)
             with torch.no_grad():
-                _,_,outputs = encoder.predconnectfromimg(img1, img2)
-            loss = criterion(outputs, targets)
+                _,_,outputs, _ = encoder.predconnectfromimg(img1, img2)
+            cnn_targets = targets.clone()
+            cnn_targets[targets==-1] = 0
+            loss = criterion(outputs, cnn_targets)
 
             test_loss += loss.item()
             _, predicted = outputs.max(1)
             test_total += targets.size(0)
-            test_correct += predicted.eq(targets).sum().item()
+            test_correct += predicted.eq(cnn_targets).sum().item()
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (test_loss/(batch_idx+1), 100.*test_correct/test_total, test_correct, test_total))
@@ -282,13 +324,15 @@ def testEncoder(args, encoder, testloader, device):
     for batch_idx, (img1, img2, targets) in enumerate(testloader):
         targets = targets.to(device)
         with torch.no_grad():
-            _,_,outputs = encoder.predconnectfromimg(img1, img2)
-        loss = criterion(outputs, targets)
+            _,_,outputs,_ = encoder.predconnectfromimg(img1, img2)
+        cnn_targets = targets.clone()
+        cnn_targets[targets==-1] = 0
+        loss = criterion(outputs, cnn_targets)
 
         test_loss += loss.item()
         _, predicted = outputs.max(1)
         test_total += targets.size(0)
-        test_correct += predicted.eq(targets).sum().item()
+        test_correct += predicted.eq(cnn_targets).sum().item()
         progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                      % (test_loss/(batch_idx+1), 100.*test_correct/test_total, test_correct, test_total))
 
