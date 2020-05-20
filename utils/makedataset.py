@@ -2,3 +2,104 @@ import os
 import sys
 import cv2
 import numpy as np
+import math
+import random
+
+def get_images_list(path):
+    '''
+    Get all names of the images in current path
+    :param path: the path of images
+    '''
+    names = []
+    for i in os.listdir(path):
+        if i.endswith('.png'):
+            names.append(i)
+    return names
+
+def compute_dis(img1, img2):
+    '''
+    Compute the distance between img1 and img2
+    '''
+    coord_x1 = float(img1.split('_')[2])
+    coord_y1 = float(img1.split('_')[3])
+
+    coord_x2 = float(img2.split('_')[2])
+    coord_y2 = float(img2.split('_')[3])
+
+    return math.sqrt((coord_x1-coord_x2)**2 + (coord_y1-coord_y2)**2)
+
+def make_cnn_dataset(path_raw, path_save, conn_min, conn_max, data_num=10000, ratio=0.8, connect_ratio=0.4):
+    '''
+    Make the dataset from carla_raw_data used for training the CNN in Encoder.
+    1 represents the two images are connected, 0 represents the two images are not connected.
+    :param path_raw: the path of the raw data
+    :param path_save: the path to save the txt files which contain the names of two images
+    :param conn_min: the minimum distance to determine whether two images are connected
+    :param conn_max: the maximum distance to determine whether two images are connected
+    :param data_num: the total number of the pairs made by the raw data
+    :param ratio: the ratio of training set and testing set
+    :param connect_ratio: the ratio of the connect pairs in all pairs
+    '''
+    imgs = get_images_list(path_raw)
+    total_imgs = len(imgs)
+    print('There are {} raw images in total.'.format(total_imgs))
+    connect = set()
+    inconnect2node = set()
+    inconnect1node = set()
+    i=0
+    while len(connect) < int(data_num*connect_ratio):
+        i=i%total_imgs
+        idx = random.randint(-50, 50)
+        distance = compute_dis(imgs[i], imgs[(i+idx+total_imgs)%total_imgs])
+        if distance < conn_max and distance > conn_min:
+            connect.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
+        i+=1
+    
+    i=0
+    while len(inconnect2node) < (data_num - len(connect))//2:
+        i = i % total_imgs
+        idx = random.randint(0, total_imgs)
+        distance = compute_dis(imgs[i], imgs[(i+idx+total_imgs)%total_imgs])
+        if distance >= conn_max:# or distance <= conn_min:
+            inconnect2node.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
+        i+=1
+    
+    i=0
+    while len(inconnect1node) < (data_num - len(connect) - len(inconnect2node)):
+        i = i % total_imgs
+        idx = random.randint(-10, 10)
+        distance = compute_dis(imgs[i], imgs[(i+idx+total_imgs)%total_imgs])
+        if distance <= conn_min:
+            inconnect1node.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
+        i += 1
+
+    allpairs = []
+    for pair in connect:
+        pair = pair.split(' ')
+        allpairs.append([pair[0], pair[1], 1])
+    for pair in inconnect2node:
+        pair = pair.split(' ')
+        allpairs.append([pair[0], pair[1], 0])
+    for pair in inconnect1node:
+        pair = pair.split(' ')
+        allpairs.append([pair[0], pair[1], -1]) # in the same node
+
+    random.shuffle(allpairs)
+
+    trainset = allpairs[0:int(data_num*ratio)]
+    testset = allpairs[int(data_num*ratio):]
+
+    path_save = os.path.join(path_save, 'min_{}_max_{}'.format(conn_min, conn_max))
+
+    if not os.path.exists(path_save):
+        os.makedirs(path_save)
+    with open(os.path.join(path_save,'training.txt'), 'w') as f:
+        for pair in trainset:
+            f.write('{0} {1} {2}\n'.format(pair[0], pair[1], pair[2]))
+
+    with open(os.path.join(path_save,'testing.txt'), 'w') as f:
+        for pair in testset:
+            f.write('{0} {1} {2}\n'.format(pair[0], pair[1], pair[2]))
+
+if __name__ == "__main__":
+    make_cnn_dataset('../dataset/carla_rawdata', '../dataset/', conn_max=4.0, conn_min=1.5, data_num=10000)

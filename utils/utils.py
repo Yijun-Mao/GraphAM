@@ -11,6 +11,7 @@ import math
 import torch.nn as nn
 import torch.nn.init as init
 
+import numpy as np
 
 def get_mean_and_std(dataset):
     '''Compute the mean and std value of dataset.'''
@@ -122,3 +123,28 @@ def format_time(seconds):
     if f == '':
         f = '0ms'
     return f
+
+
+def adj2edges(adj):
+    m = adj.shape[0]
+    edges = []
+    for i in range(m):
+        for j in range(i):
+            if adj[i, j] == 1:
+                edges.append([i,j])
+    return edges
+
+def cos_sim(vector_a, vector_b):
+    """
+    Compute the cosine similarity
+    :param vector_a: vector a 
+    :param vector_b: vector b
+    :return: sim
+    """
+    vector_a = np.mat(vector_a)
+    vector_b = np.mat(vector_b)
+    num = float(vector_a * vector_b.T)
+    denom = np.linalg.norm(vector_a) * np.linalg.norm(vector_b)
+    cos = num / denom
+    sim = 0.5 + 0.5 * cos
+    return sim
