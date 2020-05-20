@@ -23,13 +23,11 @@ class ConstructGraph(object):
     '''
     The ConstructGraph module is uesd to construct the graph based on the input images and Encoder
     '''
-    def __init__(self, args):
+
+    def __init__(self, args, loadencoder=True):
         super(ConstructGraph).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.encoder = Encoder(args)
-        self.encoder.connect.eval()
-        self.encoder.cnn.eval()
-        self.feature_size = self.encoder.cnn.feature_size
+        
         self.args = args
 
         self.all_node = []
@@ -37,7 +35,13 @@ class ConstructGraph(object):
 
         self.adj = None
 
-        self.encoder.load_model(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'encoder_new', 'best'))
+        if loadencoder:
+            self.encoder = Encoder(args)
+            self.encoder.connect.eval()
+            self.encoder.cnn.eval()
+            self.feature_size = self.encoder.cnn.feature_size
+
+            self.encoder.load_model(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'encoder_new', 'best'))
     
     def findnewnode(self, img, searchall=True):
         '''
@@ -45,7 +49,7 @@ class ConstructGraph(object):
         :param img: the input image which should have the size: 3 x args.width x args.height
         :param searchall: if True, search all nodes to find all the connection. If False, get the first connecting node.(search start from the last one)
         '''
-        feature_node = self.encoder.getobservefromimg(img).cpu().data.numpy()
+        feature_node = self.encoder.getobservefromimg(img).cpu().detach().numpy()
         if len(self.all_node) == 0:
             # There is no node before, construct the first node
             self.all_node.append(feature_node)
@@ -57,11 +61,11 @@ class ConstructGraph(object):
                 p_connect = self.encoder.predictconnect(self.all_node[i], feature_node)
 
                 if p_connect[1] >= self.args.connect_threshold:
-                    cosine_similarity = cos_sim(self.all_node[i], feature_node)
-                    # Only when the cosine_similarity is smaller than threshold we can view these two image as different node, not the same node
+                    similarity = np.linalg.norm(self.all_node[i] - feature_node, ord=2)
+                    # Only when the similarity is larger than threshold we can view these two image as different node, not the same node
                     
-                    if cosine_similarity < self.args.cos_sim_threshold:
-                        # print(cosine_similarity)
+                    if similarity > self.args.sim_threshold:
+                        # print(similarity)
                         # print()
                         if searchall:
                             tmp_edges[p_connect[1]] = [i, len(self.all_node)]
@@ -109,9 +113,9 @@ class ConstructGraph(object):
         if self.adj is None:
             self.consgraph()
         if not sparse:
-            return self.all_node, self.adj.toarray()
+            return np.array(self.all_node), self.adj.toarray()
         else:
-            return self.all_node, self.adj
+            return np.array(self.all_node), self.adj
 
     def savegraph(self, path):
         '''
@@ -145,8 +149,7 @@ def SimulateGraph(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     simulateloader = DataLoader(SimulateConstructGraphData(args.path_images, 
                             target_transform=transforms.Compose([transforms.Resize(args.img_width),
-                                                                transforms.ToTensor(),
-                                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])),
+                                                                transforms.ToTensor()])),
                             batch_size=1, shuffle=False, num_workers=4)
 
     coords = []

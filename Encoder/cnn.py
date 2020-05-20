@@ -117,7 +117,7 @@ class Encoder(object):
         return pre_obs: the observation extracted from previous image
         return now_obs: the observation extracted from current image
         return p_connect: the output of the connection (no softmax)
-        return cos_sim: the cosine similarity of two observation
+        return sim: the similarity(L2 distance) of two observation
         '''
         pre_input = pre_input.to(self.device)
         now_input = now_input.to(self.device)
@@ -125,9 +125,10 @@ class Encoder(object):
         pre_obs = self.cnn(pre_input)
         now_obs = self.cnn(now_input)
         p_connect = self.connect(torch.cat([pre_obs, now_obs],dim=-1))
-        cos_sim = F.cosine_similarity(pre_obs, now_obs)
+        # sim = F.cosine_similarity(pre_obs, now_obs)
+        sim = torch.norm(pre_obs-now_obs,dim=-1)
 
-        return pre_obs, now_obs, p_connect, cos_sim
+        return pre_obs, now_obs, p_connect, sim
 
     def predconnectfromobs(self, observ, img):
         '''
@@ -148,11 +149,11 @@ class Encoder(object):
     def getobservefromimg(self, img):
         '''
         Get the observe from the input image
-        param img: the input image which should have the size: 3xwidthxhegiht
+        param img: the input image which should have the size: 3xwidthxhegiht, and it should be torch.tensor
         return feature: the observe extracted by the CNN
         '''
-        img = torch.Tensor(img)
-        now_input = img.to(self.device)
+        img = torch.Tensor(img).float()
+        now_input = img.requires_grad.to(self.device)
         now_obs = self.cnn(now_input)
         return now_obs
 
@@ -168,7 +169,7 @@ class Encoder(object):
         obs1 = torch.from_numpy(obs1).to(self.device)
         obs2 = torch.from_numpy(obs2).to(self.device)
         p_connect = self.connect(torch.cat([obs1, obs2], dim=-1), softmax=True)
-        return torch.squeeze(p_connect).cpu().data.numpy()
+        return torch.squeeze(p_connect).cpu().detach().numpy()
 
 
     def save_model(self, path):
@@ -179,8 +180,8 @@ class Encoder(object):
         if not os.path.exists(path):
             os.makedirs(path)
         print("Saving weights in "+path)
-        torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn_r{}.pt'.format(self.args.cos_sim_reg)))
-        torch.save(self.connect.state_dict(), os.path.join(path, 'connect_r{}.pt'.format(self.args.cos_sim_reg)))
+        torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn_r{}.pt'.format(self.args.sim_reg)))
+        torch.save(self.connect.state_dict(), os.path.join(path, 'connect_r{}.pt'.format(self.args.sim_reg)))
 
     def load_model(self, path):
         '''
@@ -188,13 +189,13 @@ class Encoder(object):
         param path: the path of the folder which the weights are saved
         '''
         assert os.path.isfile(os.path.join(
-            path, 'cnn_r{}.pt'.format(self.args.cos_sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'cnn.pt'))
+            path, 'cnn_r{}.pt'.format(self.args.sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'cnn.pt'))
         assert os.path.isfile(os.path.join(
-            path, 'connect_r{}.pt'.format(self.args.cos_sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
+            path, 'connect_r{}.pt'.format(self.args.sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
         
         print("Loading weights from "+ path)
-        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_r{}.pt'.format(self.args.cos_sim_reg))))
-        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_r{}.pt'.format(self.args.cos_sim_reg))))
+        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_r{}.pt'.format(self.args.sim_reg))))
+        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_r{}.pt'.format(self.args.sim_reg))))
     
     def initialize(self):
         '''
@@ -248,7 +249,7 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
         for batch_idx, (img1, img2, targets) in enumerate(trainloader):
             # targets: 0 connect, 1 not connect
             targets = targets.to(device)
-            _, _, outputs, cos_sim = encoder.predconnectfromimg(img1, img2)
+            _, _, outputs, sim = encoder.predconnectfromimg(img1, img2)
 
             connect_optimizer.zero_grad()
 
@@ -259,10 +260,11 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
             _, predicted = outputs.max(1)
             outputs_soft = F.softmax(outputs)
 
-            if cos_sim[targets==-1].shape == torch.Size([0]):
+            if sim[targets==-1].shape == torch.Size([0]):
                 c_loss = c_loss_pred.clone()
             else:
-                c_loss_cos = torch.mean(cos_sim[targets==-1].mul(outputs_soft[targets==-1,1])) * args.cos_sim_reg
+                # c_loss_cos = torch.mean(sim[targets==-1].mul(outputs_soft[targets==-1,1])) * args.sim_reg
+                c_loss_cos = torch.mean(outputs_soft[targets == -1, 1].div(sim[targets == -1] + 0.1)) * args.sim_reg
                 c_loss = c_loss_pred + c_loss_cos
 
             c_loss.backward(retain_graph=True)
@@ -346,14 +348,12 @@ def main(args):
     
     trainloader = DataLoader(EncoderData(args.path_images, os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'training.txt'), 
                             target_transform=transforms.Compose([transforms.Resize(args.img_width),
-                                                                transforms.ToTensor(),
-                                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])),
+                                                                transforms.ToTensor()])),
                             batch_size=args.encoder_batchsize, shuffle=True, num_workers=4)
 
     testloader = DataLoader(EncoderData(args.path_images, os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'testing.txt'), 
                             target_transform=transforms.Compose([transforms.Resize(args.img_width),
-                                                                transforms.ToTensor(),
-                                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])),
+                                                                transforms.ToTensor()])),
                             batch_size=args.encoder_batchsize, shuffle=False, num_workers=4)
 
     if args.test_encoder:
