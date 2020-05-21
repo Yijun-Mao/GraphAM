@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 import os
 import numpy as np
 
-from cnn import Encoder
+from .cnn import Encoder
 import sys
 import scipy.sparse as sp
 from tqdm import tqdm

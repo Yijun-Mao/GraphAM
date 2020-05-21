@@ -45,22 +45,26 @@ class ConnetClassify(nn.Module):
         self.bn4 = nn.BatchNorm1d(hidden_units)
         self.linear5 = nn.Linear(hidden_units, 2)  # binary classification, connect or not
     
-    def forward(self, x, softmax=False):
+    def forward(self, x, softmax=False, dropout=0.2):
         out = self.linear1(x)
         out = self.bn1(out)
         out = F.relu(out)
+        out = F.dropout(out, dropout)
         out = self.linear2(out)
         out = self.bn2(out)
         out = F.relu(out)
+        out = F.dropout(out, dropout)
         out = self.linear3(out)
         out = self.bn3(out)
         out = F.relu(out)
+        out = F.dropout(out, dropout)
         out = self.linear4(out)
         out = self.bn4(out)
         out = F.relu(out)
+        out = F.dropout(out, dropout)
         out = self.linear5(out)
         if softmax:
-            out = F.softmax(out)
+            out = F.softmax(out, dim=-1)
         return out
 
 def makeCNN(cnn_backbone='resnet18'):
@@ -246,6 +250,8 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
         cnn_train_loss = 0
         correct = 0
         total = 0
+        encoder.cnn.train()
+        encoder.connect.train()
         for batch_idx, (img1, img2, targets) in enumerate(trainloader):
             # targets: 0 connect, 1 not connect
             targets = targets.to(device)
@@ -258,13 +264,14 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
             c_loss_pred = criterion(outputs, connect_targets)
 
             _, predicted = outputs.max(1)
-            outputs_soft = F.softmax(outputs)
+            outputs_soft = F.softmax(outputs,dim=-1)
 
             if sim[targets==-1].shape == torch.Size([0]):
                 c_loss = c_loss_pred.clone()
             else:
+                # print(sim[targets == -1])
                 # c_loss_cos = torch.mean(sim[targets==-1].mul(outputs_soft[targets==-1,1])) * args.sim_reg
-                c_loss_cos = torch.mean(outputs_soft[targets == -1, 1].div(sim[targets == -1] + 0.1)) * args.sim_reg
+                c_loss_cos = torch.mean(outputs_soft[targets == -1, 1].div(sim[targets == -1] + 0.05)) * args.sim_reg
                 c_loss = c_loss_pred + c_loss_cos
 
             c_loss.backward(retain_graph=True)
@@ -295,6 +302,8 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
         test_total = 0
         for batch_idx, (img1, img2, targets) in enumerate(testloader):
             targets = targets.to(device)
+            encoder.cnn.eval()
+            encoder.connect.eval()
             with torch.no_grad():
                 _,_,outputs, _ = encoder.predconnectfromimg(img1, img2)
             cnn_targets = targets.clone()
