@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import os
 
-from envs_manager import VecNormalize
+from DRL.envs_manager import VecNormalize
 
 
 # Get a render function

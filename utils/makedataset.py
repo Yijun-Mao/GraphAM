@@ -14,12 +14,14 @@ def get_images_list(path):
     for i in os.listdir(path):
         if i.endswith('.png'):
             names.append(i)
-    return names
+    return sorted(names)
 
 def compute_dis(img1, img2):
     '''
     Compute the distance between img1 and img2
     '''
+    img1 = img1.split('.')[0]
+    img2 = img2.split('.')[0]
     coord_x1 = float(img1.split('_')[2])
     coord_y1 = float(img1.split('_')[3])
 
@@ -49,12 +51,14 @@ def make_cnn_dataset(path_raw, path_save, conn_min, conn_max, data_num=10000, ra
     i=0
     while len(connect) < int(data_num*connect_ratio):
         i=i%total_imgs
-        idx = random.randint(-50, 50)
+        idx = random.randint(-30, 30)
         distance = compute_dis(imgs[i], imgs[(i+idx+total_imgs)%total_imgs])
         if distance < conn_max and distance > conn_min:
             connect.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
         i+=1
-    
+        if i%2000 == 0:
+            print("Get {}/{} images".format(len(connect), int(data_num*connect_ratio)))
+    print("connect done")
     i=0
     while len(inconnect2node) < (data_num - len(connect))//2:
         i = i % total_imgs
@@ -63,16 +67,20 @@ def make_cnn_dataset(path_raw, path_save, conn_min, conn_max, data_num=10000, ra
         if distance >= conn_max:# or distance <= conn_min:
             inconnect2node.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
         i+=1
-    
+        if i%2000 == 0:
+            print("Get {}/{} images".format(len(inconnect2node), (data_num - len(connect))//2))
+    print("inconnect2 done")
     i=0
     while len(inconnect1node) < (data_num - len(connect) - len(inconnect2node)):
         i = i % total_imgs
-        idx = random.randint(-10, 10)
+        idx = random.randint(-20, 20)
         distance = compute_dis(imgs[i], imgs[(i+idx+total_imgs)%total_imgs])
         if distance <= conn_min:
             inconnect1node.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
         i += 1
-
+        if i%2000 == 0:
+            print("Get {}/{} images".format(len(inconnect1node), data_num - len(connect) - len(inconnect2node)))
+    print("inconnect1 done")
     allpairs = []
     for pair in connect:
         pair = pair.split(' ')

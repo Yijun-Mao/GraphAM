@@ -1,7 +1,7 @@
 
 import gym
 import numpy as np
-from carla.client import VehicleControl
+from DRL.carla.client import VehicleControl
 
 
 class CarlaActionsConverter(object):

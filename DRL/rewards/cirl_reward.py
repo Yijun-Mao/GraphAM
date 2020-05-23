@@ -1,5 +1,5 @@
 import numpy as np
-from observation_utils import CarlaObservationConverter
+from DRL.observation_utils import CarlaObservationConverter
 
 class CIRLReward():
     '''

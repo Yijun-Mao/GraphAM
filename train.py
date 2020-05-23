@@ -59,7 +59,7 @@ def load_config_file(filename):
 def set_random_seeds(args, config):
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
-    if args.cuda:
+    if args.gpu:
         torch.cuda.manual_seed(config.seed)
     # TODO: Set CARLA seed (or env seed)
 
@@ -72,6 +72,7 @@ def main():
     for ids in args.gpu:
         gpus += str(ids)
         gpus += ','
+    print(gpus)
     os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
     config = get_config_and_checkpoint(args)
@@ -121,44 +122,14 @@ def main():
                          config.gamma, device, config.reward_class, num_frame_stack=1, subset=config.experiments_subset,
                          norm_reward=norm_reward, norm_obs=norm_obs, apply_her=config.num_virtual_goals > 0,
                          video_every=args.video_interval, video_dir=os.path.join(args.save_dir, 'video', experiment_name))
-    
-    agent = Navigation(args, envs.action_space.shape[0], config)
+
+    agent = Navigation(args, envs.action_space, config)
     # if config.agent == 'forward':
     #     agent = agents.ForwardCarla()
 
-    # if config.agent == 'a2c':
-    #     agent = agents.A2CCarla(obs_converter,
-    #                             action_converter,
-    #                             config.value_loss_coef,
-    #                             config.entropy_coef,
-    #                             lr=config.lr,
-    #                             eps=config.eps, alpha=config.alpha,
-    #                             max_grad_norm=config.max_grad_norm)
 
-    # elif config.agent == 'acktr':
-    #     agent = agents.A2CCarla(obs_converter,
-    #                             action_converter,
-    #                             config.value_loss_coef,
-    #                             config.entropy_coef,
-    #                             lr=config.lr,
-    #                             eps=config.eps, alpha=config.alpha,
-    #                             max_grad_norm=config.max_grad_norm,
-    #                             acktr=True)
-
-    # elif config.agent == 'ppo':
-    #     agent = agents.PPOCarla(obs_converter,
-    #                             action_converter,
-    #                             config.clip_param,
-    #                             config.ppo_epoch,
-    #                             config.num_mini_batch,
-    #                             config.value_loss_coef,
-    #                             config.entropy_coef,
-    #                             lr=config.lr,
-    #                             eps=config.eps,
-    #                             max_grad_norm=config.max_grad_norm)
-
-    if args.load_agent_gat is not None:
-        agent.loadmodel(args.load_agent_gat)
+    if args.load_agent_gat:
+        agent.loadmodel(args.out_dir)
 
     rollouts = RolloutStorage(config.num_steps, config.num_processes,
                               envs.observation_space, envs.action_space, 
@@ -169,7 +140,7 @@ def main():
     obs = obs_to_dict(obs)
     rollouts.obs = obs_to_dict(rollouts.obs)
     for k in rollouts.obs:
-        rollouts.obs[k][rollouts.step + 1].copy_(obs[k])
+        rollouts.obs[k][rollouts.step].copy_(obs[k])
     rollouts.obs = dict_to_obs(rollouts.obs)
     rollouts.to(device)
 
@@ -242,8 +213,8 @@ def main():
             # Logging to the stdout/our logs
             end = time.time()
             logger.info('------------------------------------')
-            logger.info('Episodes {}, Updates {}, num timesteps {}, FPS {}'
-                        .format(total_episodes, j + 1, total_num_steps, total_num_steps / (end - start)))
+            logger.info('Episodes {}, Updates {}, num timesteps {}, FPS {}, value_loss {}, action_loss {}, dist_entropy {}'
+                        .format(total_episodes, j + 1, total_num_steps, total_num_steps / (end - start), value_loss, action_loss, dist_entropy))
             logger.info('------------------------------------')
 
             # Logging to tensorboard

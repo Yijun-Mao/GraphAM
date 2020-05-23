@@ -156,8 +156,8 @@ class Encoder(object):
         param img: the input image which should have the size: 3xwidthxhegiht, and it should be torch.tensor
         return feature: the observe extracted by the CNN
         '''
-        img = torch.Tensor(img).float()
-        now_input = img.requires_grad.to(self.device)
+        # img = torch.Tensor(img).float()
+        now_input = img.to(self.device)
         now_obs = self.cnn(now_input)
         return now_obs
 
@@ -198,8 +198,8 @@ class Encoder(object):
             path, 'connect_r{}.pt'.format(self.args.sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
         
         print("Loading weights from "+ path)
-        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_r{}.pt'.format(self.args.sim_reg))))
-        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_r{}.pt'.format(self.args.sim_reg))))
+        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_r{}.pt'.format(self.args.sim_reg)), map_location=lambda storage, loc: storage))
+        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_r{}.pt'.format(self.args.sim_reg)), map_location=lambda storage, loc: storage))
     
     def initialize(self):
         '''
@@ -353,7 +353,7 @@ def main(args):
     encoder = Encoder(args)
     if not os.path.isfile(os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'training.txt')):
         print('The training set and testing set are not divided. Make them now')
-        make_cnn_dataset(args.path_images, args.path_train_test, conn_max=args.connect_max, conn_min=args.connect_min, data_num=10000)
+        make_cnn_dataset(args.path_images, args.path_train_test, conn_max=args.connect_max, conn_min=args.connect_min, data_num=args.img_dataset_num)
     
     trainloader = DataLoader(EncoderData(args.path_images, os.path.join(args.path_train_test, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'training.txt'), 
                             target_transform=transforms.Compose([transforms.Resize(args.img_width),

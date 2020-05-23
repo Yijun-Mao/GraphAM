@@ -8,21 +8,21 @@
 
 from __future__ import print_function
 
-from carla.driving_benchmark.experiment import Experiment
-from carla.sensor import Camera
-from carla.settings import CarlaSettings
-from carla.driving_benchmark.experiment_suites.experiment_suite import ExperimentSuite
+from DRL.carla.driving_benchmark.experiment import Experiment
+from DRL.carla.sensor import Camera
+from DRL.carla.settings import CarlaSettings
+from DRL.carla.driving_benchmark.experiment_suites.experiment_suite import ExperimentSuite
 
 
 class CoRL2017(ExperimentSuite):
 
     @property
     def train_weathers(self):
-        return [1, 3, 6, 8]
+        return [1]
 
     @property
     def test_weathers(self):
-        return [4, 14]
+        return [1]
 
     def _poses_town01(self):
         """

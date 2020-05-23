@@ -4,19 +4,19 @@ import cv2
 import skvideo.io
 import numpy as np
 
-import rewards
+import DRL.rewards as rewards
 
-import experiment_suites
-import carla.driving_benchmark.experiment_suites as experiment_suites_benchmark
-from carla.client import VehicleControl
-from carla.planner.planner import Planner
-from carla.settings import CarlaSettings
-from carla.client import CarlaClient
-from carla.tcp import TCPConnectionError
-from observation_utils import CameraException
+import DRL.experiment_suites as experiment_suites
+import DRL.carla.driving_benchmark.experiment_suites as experiment_suites_benchmark
+from DRL.carla.client import VehicleControl
+from DRL.carla.planner.planner import Planner
+from DRL.carla.settings import CarlaSettings
+from DRL.carla.client import CarlaClient
+from DRL.carla.tcp import TCPConnectionError
+from DRL.observation_utils import CameraException
 import gym
 
-from carla_logger import get_carla_logger
+from DRL.carla_logger import get_carla_logger
 # TODO: Remove this before open-sourcing environment
 
 class CarlaEnv(object):
@@ -103,7 +103,7 @@ class CarlaEnv(object):
                                                 self._target)
                 self.last_direction = directions
                 obs = self._obs_converter.convert(measurements, sensor_data, directions, self._target, self.id)
-
+                # print('env.py', obs['v'])
                 if self.video_writer is not None and self.steps % 2 == 0:
                     self._raster_frame(sensor_data, measurements, directions, obs)
 
@@ -217,11 +217,11 @@ class CarlaEnv(object):
 
         frame = sensor_data['CameraRGB'].data.copy()
         cv2.putText(frame, text='Episode number: {:,}'.format(self.num_episodes-1),
-                org=(50, 50), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1.0,
-                color=[0, 0, 0], thickness=2)
+                org=(50, 50), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7,
+                color=[0, 255, 0], thickness=1)
         cv2.putText(frame, text='Environment steps: {:,}'.format(self.steps),
-                org=(50, 80), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1.0,
-                color=[0, 0, 0], thickness=2)
+                org=(50, 80), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7,
+                color=[0, 255, 0], thickness=1)
 
         REACH_GOAL = 0.0
         GO_STRAIGHT = 5.0
@@ -241,14 +241,17 @@ class CarlaEnv(object):
         else:
             raise ValueError(directions)
         cv2.putText(frame, text='Direction: {}'.format(dir_str),
-                    org=(50, 110), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1.0,
-                    color=[0, 0, 0], thickness=2)
+                    org=(50, 110), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7,
+                    color=[0, 255, 0], thickness=1)
         cv2.putText(frame, text='Speed: {:.02f}'.format( measurements.player_measurements.forward_speed * 3.6),
-                    org=(50, 140), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1.0,
-                    color=[0, 0, 0], thickness=2)
-        cv2.putText(frame, text='rel_x: {:.02f}, rel_y: {:.02f}'.format(obs['v'][-2].item(), obs['v'][-1].item()),
-                    org=(50, 170), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1.0,
-                    color=[0, 0, 0], thickness=2)
+                    org=(50, 140), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7,
+                    color=[0, 255, 0], thickness=1)
+        cv2.putText(frame, text='target_x: {:.02f}, target_y: {:.02f}'.format(obs['v'][-2].item(), obs['v'][-1].item()),
+                    org=(50, 170), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7,
+                    color=[0, 255, 0], thickness=1)
+        cv2.putText(frame, text='location_x: {:.02f}, location_y: {:.02f}'.format(obs['v'][0].item(), obs['v'][1].item()),
+                    org=(50, 200), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7,
+                    color=[0, 255, 0], thickness=1)
         self.video_writer.writeFrame(frame)
 
 
@@ -272,6 +275,7 @@ class CarlaEnv(object):
         self.logger.info('Env {} gets experiment {} with pose {}'.format(self.id, experiment_idx, idx_pose))
         start_index = pose[0]
         end_index = pose[1]
+        # print('positions ',positions)
         self._client.start_episode(start_index)
         self._time_out = self._experiment_suite.calculate_time_out(
                         self._get_shortest_path(positions[start_index], positions[end_index]))
@@ -318,6 +322,7 @@ class CarlaEnv(object):
         exp_settings = experiment.Conditions
         exp_settings.set(QualityLevel='Low')
         positions = self._client.load_settings(exp_settings).player_start_spots
+        
         start_index = pose[0]
         end_index = pose[1]
         self._client.start_episode(start_index)

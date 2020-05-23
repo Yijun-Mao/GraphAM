@@ -72,12 +72,16 @@ class VecNormalize(VecEnvWrapper):
     def _obfilt(self, obs):
         if self.norm_type == 'FixedMaxMin' and self.ob:
             for key in obs:
+                if key == 'v':
+                    continue
                 if len(self.shapes[key]) == 1:
                     obs[key] = (obs[key] - self.obs_space.spaces[key].low) /(self.obs_space.spaces[key].high - self.obs_space.spaces[key].low)
             return dict_to_obs(obs)
         elif self.norm_type == 'RunningMean' and self.ob_rms:
             obs = obs_to_dict(obs)
             for key in self.ob_rms:
+                if key == 'v':
+                    continue
                 if self.training: # Only update when training
                     self.ob_rms[key].update(obs[key])
                 obs[key] = np.clip((obs[key] - self.ob_rms[key].mean) / np.sqrt(self.ob_rms[key].var + self.epsilon), -self.clipob, self.clipob)

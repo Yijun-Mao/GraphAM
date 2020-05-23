@@ -1,17 +1,18 @@
 import os
+import sys
 
 import gym
 import numpy as np
 import torch
 from gym.spaces.box import Box
 
-from vec_env import VecEnvWrapper
-from vec_env.subproc_vec_env import SubprocVecEnv
-from vec_env.dummy_vec_env import DummyVecEnv
-from vec_env.vec_normalize import VecNormalize
-from vec_env.util import dict_to_obs, obs_to_dict
+from DRL.vec_env import VecEnvWrapper
+from DRL.vec_env.subproc_vec_env import SubprocVecEnv
+from DRL.vec_env.dummy_vec_env import DummyVecEnv
+from DRL.vec_env.vec_normalize import VecNormalize
+from DRL.vec_env.util import dict_to_obs, obs_to_dict
 
-from env import CarlaEnv
+from DRL.env import CarlaEnv
 
 def make_env(obs_converter, action_converter, port, id, seed, subset,
              video_every, video_dir, reward_class_name, experiment_suite, benchmark, city_name):
@@ -134,9 +135,8 @@ class VecPyTorchFrameStack(VecEnvWrapper):
             if device is None:
                 device = torch.device('cpu')
             self.stacked_obs[k] = torch.zeros((venv.num_envs,) + low.shape).to(device)
-
-            new_observation_spaces[k] = gym.spaces.Box(
-                low=low, high=high, dtype=venv.observation_space.dtype)
+            
+            new_observation_spaces[k] = gym.spaces.Box(low=low, high=high)
 
         if set(new_observation_spaces.keys()) == {None}:
             VecEnvWrapper.__init__(self, venv, observation_space=new_observation_spaces[None])

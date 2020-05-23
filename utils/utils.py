@@ -42,6 +42,8 @@ def init_params(net):
             if m.bias:
                 init.constant(m.bias, 0)
 
+def computedistance2points(point1, point2):
+    return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
 
 _, term_width = os.popen('stty size', 'r').read().split()
 term_width = int(term_width)

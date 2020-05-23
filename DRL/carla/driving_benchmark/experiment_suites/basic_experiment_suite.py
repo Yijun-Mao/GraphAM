@@ -7,9 +7,9 @@
 
 from __future__ import print_function
 
-from carla.driving_benchmark.experiment import Experiment
-from carla.sensor import Camera
-from carla.settings import CarlaSettings
+from DRL.carla.driving_benchmark.experiment import Experiment
+from DRL.carla.sensor import Camera
+from DRL.carla.settings import CarlaSettings
 
 from .experiment_suite import ExperimentSuite
 

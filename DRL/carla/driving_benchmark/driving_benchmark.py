@@ -10,12 +10,12 @@ import logging
 import math
 import time
 
-from carla.client import VehicleControl
-from carla.client import make_carla_client
-from carla.driving_benchmark.metrics import Metrics
-from carla.planner.planner import Planner
-from carla.settings import CarlaSettings
-from carla.tcp import TCPConnectionError
+from DRL.carla.client import VehicleControl
+from DRL.carla.client import make_carla_client
+from DRL.carla.driving_benchmark.metrics import Metrics
+from DRL.carla.planner.planner import Planner
+from DRL.carla.settings import CarlaSettings
+from DRL.carla.tcp import TCPConnectionError
 
 from . import results_printer
 from .recording import Recording

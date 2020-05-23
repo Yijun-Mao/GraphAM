@@ -15,7 +15,6 @@ from Encoder.ConstrucGraph import ConstructGraph
 from Encoder.cnn import Encoder
 from GAT.models import GAT
 from utils.utils import *
-import DRL.agents as agents
 from DRL.policy import Policy
 
 MEAN = [0.485, 0.456, 0.406]
@@ -84,7 +83,20 @@ class Navigation(object):
 
         self.config = config
 
-        self.agent = Policy(self.feature_size, self.guide_space, action_space).to(self.device)
+        if action_space.__class__.__name__ == "Discrete":
+            self.num_outputs = action_space.n
+            mode = "Discrete"
+        elif action_space.__class__.__name__ == "Box":
+            self.num_outputs = action_space.shape[0]
+            mode = "Box"
+        else:
+            raise NotImplementedError
+        # if config.action_type == "carla-original":
+        #     action_num_outputs = envs.action_space.n
+        # elif config.action_type == "continuous":
+        #     action_num_outputs = envs.action_space.shape[0]
+
+        self.agent = Policy(self.feature_size, self.guide_space, action_space, mode=mode).to(self.device)
 
         self.value_loss_coef = self.config.value_loss_coef
         self.entropy_coef = self.config.entropy_coef
@@ -139,7 +151,7 @@ class Navigation(object):
         else:
             if self.coords is None:
                 coords = np.load(os.path.join(self.args.out_dir, 'min_{}_max_{}'.format(
-                    self.args.connect_min, self.args.connect_max), 'graph', 'coordinate.npy'))
+                    self.args.connect_min, self.args.connect_max), 'graph', 'coordinate.npy'), allow_pickle=True)
                 self.coords = np.array([[x,y] for x,y,head in coords])
             if len(observation.shape) == 1:
                 observation = np.expand_dims(observation, axis=0)
@@ -158,39 +170,44 @@ class Navigation(object):
     def aggregatefeature(self, nodes, adj):
         '''
         Aggregate the features in graph with GAT
-        :param nodes: the nodes in the graph (torch.tensor)
-        :param adj: the adjacent matrix of the graph (torch.tensor)
+        :param nodes: the nodes in the graph (numpy.array)
+        :param adj: the adjacent matrix of the graph (numpy.array)
         return: the new features after aggregating
         '''
-        nodes = nodes.to(self.device)
-        adj = adj.to(self.device)
+        nodes = torch.FloatTensor(nodes).to(self.device)
+        adj = torch.FloatTensor(adj).to(self.device).squeeze()
         output = self.gat(nodes, adj)
+        # self.node_features = output
         return output
 
     def act(self, inputs, deterministic=False, groundtruth=True):
-        img = inputs['img'].astype(np.float)
-        img = torch.from_numpy(img)
+        img = inputs['img']
+        # img = torch.from_numpy(img)
+        target = inputs['v']
+        target = target[:,-3:-1].cpu().numpy()
         observation = self.encoder.getobservefromimg(img)
         current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
-
+        self.node_features = self.aggregatefeature(self.all_nodes, self.adjacent)
         # if updatetarget:
             # target = inputs['v'].astype(np.float)
             # target = torch.from_numpy(target)
             # target_obs = self.encoder.getobservefromimg(target)
             # self.target_i_act = self.locateingraph(target_obs, L=3)
             # self.target_i_act = self.locateingraph(inputs['v'], groundtruth=groundtruth)
-        self.target_i_act = self.locateingraph(inputs['v'], groundtruth=groundtruth)
+        self.target_i_act = self.locateingraph(target, groundtruth=groundtruth)
 
         guide = self.node_features[self.target_i_act] - self.node_features[current_i]
 
         value, action, action_log_prob = self.agent.act(
-            observation, guide, deterministic)
+            observation, guide, self.eps_curr, deterministic)
         
         return value, action, action_log_prob
 
     def get_value(self, inputs, groundtruth=True):
-        img = inputs['img'].astype(np.float)
-        img = torch.from_numpy(img)
+        img = inputs['img']
+        # img = torch.from_numpy(img)
+        target = inputs['v']
+        target = target[:,-3:-1].cpu().numpy()
         observation = self.encoder.getobservefromimg(img)
         current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
 
@@ -199,7 +216,8 @@ class Navigation(object):
             # target = torch.from_numpy(target)
             # target_obs = self.encoder.getobservefromimg(target)
             # self.target_i_value = self.locateingraph(target_obs, L=3)
-        target_i_value = self.locateingraph(inputs['v'], groundtruth=groundtruth)
+        target_i_value = self.locateingraph(target, groundtruth=groundtruth)
+        self.node_features = self.aggregatefeature(self.all_nodes, self.adjacent)
 
         guide = self.node_features[target_i_value] - self.node_features[current_i]
         return self.agent.get_value(observation, guide)
@@ -207,21 +225,30 @@ class Navigation(object):
     def update(self, rollouts, groundtruth=True):
         if self.config.agent == 'a2c':
             self.eps_curr = max(0.0, self.eps_curr - self.eps_greedy_decay)
-            # obs_shape = {k: r.size()[2:] for k, r in rollouts.obs.items()}
+            obs_shape = {k: r.size()[2:] for k, r in rollouts.obs.items()}
             # rollouts_flatten = {k: r[:-1].view(-1, *obs_shape[k]) for k, r in rollouts.obs.items()}
-            
+            rollouts_flatten = {}
+            for k,r in rollouts.obs.items():
+                r = r[:-1].view(-1, *obs_shape[k])
+                if k == 'v':
+                    r = r[:, -3:-1]
+                rollouts_flatten[k] = r
+                    
+            action_shape = rollouts.actions.size()[-1]
             num_steps, num_processes, _ = rollouts.rewards.size()
-            observation = self.encoder.getobservefromimg(rollouts['img'])
+            observation = self.encoder.getobservefromimg(rollouts_flatten['img'])
             current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
 
-            target_i_act = self.locateingraph(rollouts['v'], groundtruth=groundtruth)
+            target_i_act = self.locateingraph(rollouts_flatten['v'].cpu().detach().numpy(), groundtruth=groundtruth)
+            
+            self.node_features = self.aggregatefeature(self.all_nodes, self.adjacent)
 
             guide = self.node_features[target_i_act] - self.node_features[current_i]
 
             values, action_log_probs, dist_entropy = self.agent.evaluate_actions(
                 observation,
                 guide,
-                rollouts.actions.view(-1, self.action_space))
+                rollouts.actions.view(-1, action_shape))
 
             values = values.view(num_steps, num_processes, 1)
             action_log_probs = action_log_probs.view(num_steps, num_processes, 1)
@@ -231,22 +258,6 @@ class Navigation(object):
 
             action_loss = -(advantages.detach() * action_log_probs).mean()
 
-            # if self.acktr and self.optimizer.steps % self.optimizer.Ts == 0:
-            #     # Sampled fisher, see Martens 2014
-            #     self.model.zero_grad()
-            #     pg_fisher_loss = -action_log_probs.mean()
-
-            #     value_noise = torch.randn(values.size())
-            #     if values.is_cuda:
-            #         value_noise = value_noise.cuda()
-
-            #     sample_values = values + value_noise
-            #     vf_fisher_loss = -(values - sample_values.detach()).pow(2).mean()
-
-            #     fisher_loss = pg_fisher_loss + vf_fisher_loss
-            #     self.optimizer.acc_stats = True
-            #     fisher_loss.backward(retain_graph=True)
-            #     self.optimizer.acc_stats = False
 
             self.optimizer.zero_grad()
             (value_loss * self.value_loss_coef + action_loss -
@@ -264,16 +275,16 @@ class Navigation(object):
         print('Storing agent model to: {}'.format(path))
         torch.save({'state_dict': self.agent.state_dict(),
                     'config': dict(self.config._asdict())  # Save as a Python dictionary
-                    }, os.path.join(path, 'agent.pt'))
+                    }, os.path.join(path, self.config.agent + '_agent.pt'))
         
         print('Storing GAT model to: {}'.format(path))
-        torch.save(self.gat.state_dict(), os.path.join(path, 'GAT.pt'))
+        torch.save(self.gat.state_dict(), os.path.join(path, self.config.agent + '_GAT.pt'))
         
     def loadmodel(self, path):
         print("Loading weights from " + path)
-        checkpoints = torch.load(os.path.join(path, 'agent.pt'))
+        checkpoints = torch.load(os.path.join(path, self.config.agent + '_agent.pt'), map_location=lambda storage, loc: storage)
         self.agent.load_state_dict(checkpoints['state_dict'])
-        self.gat.load_state_dict(torch.load(os.path.join(path, 'GAT.pt')))
+        self.gat.load_state_dict(torch.load(os.path.join(path, self.config.agent + '_GAT.pt')))
         
 
 

@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-from vec_env.util import dict_to_obs, obs_to_dict
+from DRL.vec_env.util import dict_to_obs, obs_to_dict
 
 import numpy as np
 

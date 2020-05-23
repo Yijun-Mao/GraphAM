@@ -1,7 +1,7 @@
-from carla.driving_benchmark.experiment_suites.corl_2017 import CoRL2017
-from carla.sensor import Camera
-from carla.settings import CarlaSettings
-from carla.driving_benchmark.experiment import Experiment
+from DRL.carla.driving_benchmark.experiment_suites.corl_2017 import CoRL2017
+from DRL.carla.sensor import Camera
+from DRL.carla.settings import CarlaSettings
+from DRL.carla.driving_benchmark.experiment import Experiment
 
 
 class TrainingSuite(CoRL2017):
@@ -23,12 +23,16 @@ class TrainingSuite(CoRL2017):
 
         camera = Camera('CameraRGB')
         camera.set(FOV=100)
-        camera.set_image_size(800, 400)
+        camera.set_image_size(800, 600)
         camera.set_position(2.0, 0.0, 1.4)
         camera.set_rotation(-15.0, 0, 0)
 
         if self._city_name == 'Town02':
-            
+            print("Running on Town02")
+            if not self._subset is None:
+                print('Subset is ',self._subset)
+            else:
+                print("All conditinos")
             if self._subset == 'keep_lane':
                 poses_tasks = [self._poses_town02()[0]]
                 vehicles_tasks = [0]
@@ -51,8 +55,8 @@ class TrainingSuite(CoRL2017):
 
             elif self._subset is None:
                 poses_tasks = self._poses_town02()
-                vehicles_tasks = [0, 0, 0, 20]
-                pedestrians_tasks = [0, 0, 0, 50]
+                vehicles_tasks = [0, 0, 0, 0]
+                pedestrians_tasks = [0, 0, 0, 0]
 
             else:
                 raise ValueError("experiments-subset must be keep_lane or keep_lane_one_turn or no_dynamic_objects or None")

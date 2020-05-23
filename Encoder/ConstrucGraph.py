@@ -126,7 +126,7 @@ class ConstructGraph(object):
             os.makedirs(path)
         print("Saving graph in "+path)
         sp.save_npz(os.path.join(path, 'adjacent_sparse.npz'), self.adj)
-        np.save(os.path.join(path, 'nodes.npy'), self.all_node)
+        np.save(os.path.join(path, 'nodes.npy'), np.squeeze(self.all_node))
     
     def loadgraph(self, path):
         '''
@@ -141,7 +141,7 @@ class ConstructGraph(object):
         print("Loading graph from "+ path)
 
         self.adj = sp.load_npz(os.path.join(path, 'adjacent_sparse.npz'))
-        self.all_node = np.load(os.path.join(path, 'nodes.npy'))
+        self.all_node = np.squeeze(np.load(os.path.join(path, 'nodes.npy')))
 
 
 def SimulateGraph(args):
