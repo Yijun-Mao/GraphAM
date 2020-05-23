@@ -54,7 +54,7 @@ class TrainingSuite(CoRL2017):
                 pedestrians_tasks = [0, 0, 0]
 
             elif self._subset is None:
-                poses_tasks = self._poses_town02()
+                poses_tasks = self._poses_town02()[:3]
                 vehicles_tasks = [0, 0, 0, 0]
                 pedestrians_tasks = [0, 0, 0, 0]
 

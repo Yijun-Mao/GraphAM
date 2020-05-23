@@ -30,6 +30,11 @@ def compute_dis(img1, img2):
 
     return math.sqrt((coord_x1-coord_x2)**2 + (coord_y1-coord_y2)**2)
 
+def train_test_split(all_files, ratio):
+    random.shuffle(all_files)
+    connect_train, connect_test = all_files[0:int(len(all_files)*ratio)], all_files[int(len(all_files)*ratio):]
+    return connect_train, connect_test
+
 def make_cnn_dataset(path_raw, path_save, conn_min, conn_max, data_num=10000, ratio=0.8, connect_ratio=0.4):
     '''
     Make the dataset from carla_raw_data used for training the CNN in Encoder.
@@ -51,7 +56,7 @@ def make_cnn_dataset(path_raw, path_save, conn_min, conn_max, data_num=10000, ra
     i=0
     while len(connect) < int(data_num*connect_ratio):
         i=i%total_imgs
-        idx = random.randint(-30, 30)
+        idx = random.randint(-25, 25)
         distance = compute_dis(imgs[i], imgs[(i+idx+total_imgs)%total_imgs])
         if distance < conn_max and distance > conn_min:
             connect.add(' '.join(sorted([imgs[i], imgs[(i+idx+total_imgs)%total_imgs]])))
@@ -81,21 +86,42 @@ def make_cnn_dataset(path_raw, path_save, conn_min, conn_max, data_num=10000, ra
         if i%2000 == 0:
             print("Get {}/{} images".format(len(inconnect1node), data_num - len(connect) - len(inconnect2node)))
     print("inconnect1 done")
-    allpairs = []
-    for pair in connect:
-        pair = pair.split(' ')
-        allpairs.append([pair[0], pair[1], 1])
-    for pair in inconnect2node:
-        pair = pair.split(' ')
-        allpairs.append([pair[0], pair[1], 0])
-    for pair in inconnect1node:
-        pair = pair.split(' ')
-        allpairs.append([pair[0], pair[1], -1]) # in the same node
 
-    random.shuffle(allpairs)
+    connect_train, connect_test = train_test_split(list(connect), ratio)
+    inconnect1node_train, inconnect1node_test = train_test_split(list(inconnect1node), ratio)
+    inconnect2node_train, inconnect2node_test = train_test_split(list(inconnect2node), ratio)
+    
+    allpairs_train = []
+    for pair in connect_train:
+        pair = pair.split(' ')
+        allpairs_train.append([pair[0], pair[1], 1])
 
-    trainset = allpairs[0:int(data_num*ratio)]
-    testset = allpairs[int(data_num*ratio):]
+    for pair in inconnect1node_train:
+        pair = pair.split(' ')
+        allpairs_train.append([pair[0], pair[1], -1])
+
+    for pair in inconnect2node_train:
+        pair = pair.split(' ')
+        allpairs_train.append([pair[0], pair[1], 0]) # in the same node
+    
+    allpairs_test = []
+    for pair in connect_test:
+        pair = pair.split(' ')
+        allpairs_test.append([pair[0], pair[1], 1])
+
+    for pair in inconnect1node_test:
+        pair = pair.split(' ')
+        allpairs_test.append([pair[0], pair[1], -1])
+        
+    for pair in inconnect2node_test:
+        pair = pair.split(' ')
+        allpairs_test.append([pair[0], pair[1], 0]) # in the same node
+
+    random.shuffle(allpairs_train)
+    random.shuffle(allpairs_test)
+
+    trainset = allpairs_train
+    testset = allpairs_test
 
     path_save = os.path.join(path_save, 'min_{}_max_{}'.format(conn_min, conn_max))
 
