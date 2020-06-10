@@ -1,6 +1,6 @@
 agent: a2c
 num_updates: 100000
-lr: 0.0007 # Learning rate
+lr: 0.0005 # Learning rate
 eps: 0.00001 # RMSprop optimizer epsilon
 alpha: 0.99 # RMSProp alpha
 gamma: 0.99 # Discount factor for rewards
@@ -12,7 +12,7 @@ value_loss_coef: 0.5
 max_grad_norm: 0.5 # Max norm of the gradients
 seed: 1 # Random seed
 num_processes: 1 # Number of processes to use for training.
-num_steps: 20
+num_steps: 40
 num_stack_frames: 2 # Number of stacked frames to train
 add_timestep: False # Add a timestep to observations
 recurrent_policy: False

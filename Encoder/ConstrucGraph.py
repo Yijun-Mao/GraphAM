@@ -2,16 +2,17 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
-
+torch.multiprocessing.set_sharing_strategy('file_system')
+  
 import os
 import numpy as np
 
-from .cnn import Encoder
 import sys
 import scipy.sparse as sp
 from tqdm import tqdm
 
 sys.path.append('../')
+from Encoder.cnn import Encoder
 from config import get_args
 from utils.utils import progress_bar, cos_sim
 from utils.makedataset import make_cnn_dataset
@@ -24,7 +25,7 @@ class ConstructGraph(object):
     The ConstructGraph module is uesd to construct the graph based on the input images and Encoder
     '''
 
-    def __init__(self, args, loadencoder=True):
+    def __init__(self, args, loadencoder=False):
         super(ConstructGraph).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         
@@ -51,34 +52,43 @@ class ConstructGraph(object):
         '''
         feature_node = self.encoder.getobservefromimg(img).cpu().detach().numpy()
         if len(self.all_node) == 0:
-            # There is no node before, construct the first node
+            # There is no node now, construct the first node
             self.all_node.append(feature_node)
             return True
         else:
             tmp_edges = {}
-            idx = list(range(len(self.all_node)))[::-1]
+            if len(self.all_node) > 2 * self.args.constructgraph_topK:
+                idx = []
+                for i,j in zip(list(range(len(self.all_node) - self.args.constructgraph_topK, len(self.all_node)))[::-1], idx + list(range(self.args.constructgraph_topK))):
+                    idx.append(i)
+                    idx.append(j)
+
+            else:
+                idx = list(range(len(self.all_node)))[::-1]
+                
             for i in idx:
                 p_connect = self.encoder.predictconnect(self.all_node[i], feature_node)
 
-                if p_connect[1] >= self.args.connect_threshold:
+                if p_connect[1] > self.args.connect_threshold:
                     similarity = np.linalg.norm(self.all_node[i] - feature_node, ord=2)
-                    # Only when the similarity is larger than threshold we can view these two image as different node, not the same node
+                    # Only when the similarity (L2 distance) is smaller than threshold we can view these two image as connected nodes, not the inconnected nodes
                     
-                    if similarity > self.args.sim_threshold:
-                        # print(similarity)
-                        # print()
+                    if similarity < self.args.sim_threshold:
+
                         if searchall:
                             tmp_edges[p_connect[1]] = [i, len(self.all_node)]
                         else:
                             self.all_node.append(feature_node)
                             self.all_edge.append([i, len(self.all_node)-1])
                             return True
-            
+                            
             if len(tmp_edges) > 0:
-                tmp_edge_sort = sorted(tmp_edges.items(), key=lambda x:x[0], reverse=True)
-                if len(tmp_edge_sort) > self.args.constructgraph_topK:
-                    tmp_edge_sort = tmp_edge_sort[0:self.args.constructgraph_topK]
+                # tmp_edge_sort = sorted(tmp_edges.items(), key=lambda x:x[0], reverse=True)
+                tmp_edge_sort = list(tmp_edges.items())
+                if len(tmp_edge_sort) > 2:
+                    tmp_edge_sort = tmp_edge_sort[0:2]
                 for p_edges in tmp_edge_sort:
+                    # print(p_edges[0])
                     self.all_edge.append(p_edges[1])
                 self.all_node.append(feature_node)
 
@@ -144,36 +154,41 @@ class ConstructGraph(object):
         self.all_node = np.squeeze(np.load(os.path.join(path, 'nodes.npy')))
 
 
-def SimulateGraph(args):
+def SimulateGraph(args, buildnewgraph=True):
     makegraph = ConstructGraph(args)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    simulateloader = DataLoader(SimulateConstructGraphData(args.path_images, 
-                            target_transform=transforms.Compose([transforms.Resize(args.img_width),
-                                                                transforms.ToTensor()])),
-                            batch_size=1, shuffle=False, num_workers=4)
+    if buildnewgraph:
+        # Construct a new graph with the simulated dataset
+        simulateloader = DataLoader(SimulateConstructGraphData(args.path_images, 
+                                target_transform=transforms.Compose([transforms.Resize(args.img_width),
+                                                                    transforms.ToTensor()])),
+                                batch_size=1, shuffle=False, num_workers=4)
 
-    coords = []
-    simulateloader = tqdm(simulateloader)
-    n=0
-    for img, coord_heading in simulateloader:
-        if makegraph.findnewnode(img, searchall=True):
-            # Succesful add node
-            coords.append(coord_heading)
-        n+=1
-        simulateloader.set_description("Now get {} nodes, discard {} images".format(len(coords), n-len(coords)))
+        coords = []
+        simulateloader = tqdm(simulateloader)
+        n=0
+        for img, coord_heading in simulateloader:
+            if makegraph.findnewnode(img, searchall=True):
+                # Succesful add node
+                coords.append(coord_heading)
+            n+=1
+            simulateloader.set_description("Now get {} nodes, discard {} images".format(len(coords), n-len(coords)))
 
-    makegraph.consgraph()
-    all_nodes, adjacent = makegraph.getgraph(sparse=True)
-    assert len(all_nodes) == len(coords), "The nodes and the coords are not equal"
-    print("There are {} nodes.".format(len(all_nodes)))
-    makegraph.savegraph(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph'))
-    np.save(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph', 'coordinate.npy'), coords)
-    # makegraph.loadgraph(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph'))
-    # all_nodes, adjacent = makegraph.getgraph(sparse=False)
-    # coords = np.load(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph', 'coordinate.npy'),allow_pickle=True)
+        makegraph.consgraph()
+        all_nodes, adjacent = makegraph.getgraph(sparse=True)
+        assert len(all_nodes) == len(coords), "The nodes and the coords are not equal"
+        print("There are {} nodes.".format(len(all_nodes)))
+        makegraph.savegraph(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph'))
+        np.save(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph', 'coordinate.npy'), coords)
+        adjacent = adjacent.toarray()
+    else:
+        # Load the graph and visualize it 
+        makegraph.loadgraph(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph'))
+        all_nodes, adjacent = makegraph.getgraph(sparse=False)
+        coords = np.load(os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph', 'coordinate.npy'),allow_pickle=True)
     print("Visualing the graph")
     draw_node_edge(adjacent, coords, os.path.join(args.out_dir, 'min_{}_max_{}'.format(args.connect_min, args.connect_max), 'graph'))
-    # 1766 nodes
+    
 
 if __name__ == '__main__':
     args = get_args()

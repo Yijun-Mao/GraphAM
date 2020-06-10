@@ -6,13 +6,14 @@ from DRL.carla.client import VehicleControl
 
 class CarlaActionsConverter(object):
 
-    def __init__(self, action_type='continuous'):
+    def __init__(self, action_type='carla-original'):
 
         self.action_type = action_type
 
         if self.action_type == 'carla-original':
-            self.discrete_actions = [[0., 0.], [-1.,0.], [-0.5,0.], [-0.25,0.], [0.25,0.], [0.5, 0.], [1.0, 0.], [0., -1.],
-                                        [0., -0.5], [0., -0.25], [0., 0.25], [0., 0.5], [0.,1.]]
+            # self.discrete_actions = [[0., 0.], [-1.,0.], [-0.5,0.], [-0.25,0.], [0.25,0.], [0.5, 0.], [1.0, 0.], [0., -1.],
+            #                             [0., -0.5], [0., -0.25], [0., 0.25], [0., 0.5], [0.,1.]]   [0.15, -0.4], [0.15,0.4],[-0.15, -0.4], [-0.15,0.4], 
+            self.discrete_actions = [[0., 0.], [-1.0,0.], [1.0, 0.],[0.15, -1.], [0.15,1.],[-0.15, -1.], [-0.15,1.]]
 
 
     def get_action_space(self):
@@ -35,7 +36,7 @@ class CarlaActionsConverter(object):
                 print('Unexpected action got {}'.format(type(action)))
             assert type(action) == int, 'Action should be an int'
             action = self.discrete_actions[action]
-            if last_measurements is not None and last_measurements.player_measurements.forward_speed * 3.6 < 30:
+            if last_measurements is not None and last_measurements.player_measurements.forward_speed * 3.6 < 15:
                 control.throttle = action[0]
             elif action[0] > 0.:
                 control.throttle = 0.

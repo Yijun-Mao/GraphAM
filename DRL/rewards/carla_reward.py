@@ -46,11 +46,11 @@ class CarlaReward():
         # Compute reward
         r = 0
         if self.state is not None:
-            r += 1000 * (self.state['d'] - d)
-            r += 0.05 * (v - self.state['v'])
-            r -= 0.00002 * (c - self.state['c'])
-            r -= -0.1 * float(s > 0.001)
-            r -= 2 * (o - self.state['o'])
+            r += 900 * (self.state['d'] - d)
+            # r += 0.07 * (v - self.state['v'])
+            r -= 0.00004 * (c - self.state['c'])
+            r -= -0.5 * float(s > 0.0005)
+            r -= 1.5 * (o - self.state['o'])
 
         # Update state
         new_state = {'d': d, 'v': v, 'c': c, 's': s, 'o': o,

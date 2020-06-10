@@ -14,9 +14,10 @@ from torch.utils.data import Dataset, DataLoader
 import os
 import numpy as np
 
-from models.resnet import ResNet18
+
 import sys
 sys.path.append('../')
+from Encoder.models.resnet import ResNet18
 from config import get_args
 from utils.utils import progress_bar
 from utils.makedataset import make_cnn_dataset
@@ -49,19 +50,19 @@ class ConnetClassify(nn.Module):
         out = self.linear1(x)
         out = self.bn1(out)
         out = F.relu(out)
-        out = F.dropout(out, dropout)
+        # out = F.dropout(out, dropout)
         out = self.linear2(out)
         out = self.bn2(out)
         out = F.relu(out)
-        out = F.dropout(out, dropout)
+        # out = F.dropout(out, dropout)
         out = self.linear3(out)
         out = self.bn3(out)
         out = F.relu(out)
-        out = F.dropout(out, dropout)
+        # out = F.dropout(out, dropout)
         out = self.linear4(out)
         out = self.bn4(out)
         out = F.relu(out)
-        out = F.dropout(out, dropout)
+        # out = F.dropout(out, dropout)
         out = self.linear5(out)
         if softmax:
             out = F.softmax(out, dim=-1)
@@ -96,9 +97,9 @@ class Encoder(object):
     def __init__(self, args):
         super(Encoder).__init__()
         '''
-        param cnn_backbone: The CNN backbone
-        param hidden_units: hidden_units in ConnetClassify, default is 512
-        param gpu: The avaliable gpu ids, should be list if gpu is avaliable
+        param args.cnn_backbone: The CNN backbone
+        param args.hidden_units: hidden_units in ConnetClassify, default is 512
+        param args.gpu: The avaliable gpu ids, should be list if gpu is avaliable
         '''
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.cnn_backbone = args.cnn_backbone
@@ -107,6 +108,7 @@ class Encoder(object):
         self.connect = ConnetClassify(self.cnn.feature_size, args.hidden_units).to(self.device)
         self.args = args
         if args.finetune:
+            # load the ImageNet-pretrained weights
             self.initialize()
         
         if torch.cuda.device_count() > 1:
@@ -164,8 +166,8 @@ class Encoder(object):
     def predictconnect(self, obs1, obs2):
         '''
         Predict the probability of the connection
-        :param obs1: the first observation 
-        :param obs2: the second observation
+        :param obs1: the first observation, should be numpy.array
+        :param obs2: the second observation, should be numpy.array
         return p_connect: the probability of the connection
         '''
         # obs1 = Variable(torch.from_numpy(obs1))
@@ -184,8 +186,8 @@ class Encoder(object):
         if not os.path.exists(path):
             os.makedirs(path)
         print("Saving weights in "+path)
-        torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn_r{}.pt'.format(self.args.sim_reg)))
-        torch.save(self.connect.state_dict(), os.path.join(path, 'connect_r{}.pt'.format(self.args.sim_reg)))
+        torch.save(self.cnn.state_dict(), os.path.join(path, 'cnn_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg)))
+        torch.save(self.connect.state_dict(), os.path.join(path, 'connect_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg)))
 
     def load_model(self, path):
         '''
@@ -193,13 +195,13 @@ class Encoder(object):
         param path: the path of the folder which the weights are saved
         '''
         assert os.path.isfile(os.path.join(
-            path, 'cnn_r{}.pt'.format(self.args.sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'cnn.pt'))
+            path, 'cnn_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'cnn_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg)))
         assert os.path.isfile(os.path.join(
-            path, 'connect_r{}.pt'.format(self.args.sim_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'connect.pt'))
+            path, 'connect_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg))), '{} is not existed, please check the path'.format(os.path.join(path, 'connect_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg)))
         
         print("Loading weights from "+ path)
-        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_r{}.pt'.format(self.args.sim_reg)), map_location=lambda storage, loc: storage))
-        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_r{}.pt'.format(self.args.sim_reg)), map_location=lambda storage, loc: storage))
+        self.cnn.load_state_dict(torch.load(os.path.join(path, 'cnn_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg)), map_location=lambda storage, loc: storage))
+        self.connect.load_state_dict(torch.load(os.path.join(path, 'connect_maxD{}_disR{}.pt'.format(self.args.max_node_dis, self.args.node_dis_reg)), map_location=lambda storage, loc: storage))
     
     def initialize(self):
         '''
@@ -208,34 +210,27 @@ class Encoder(object):
         print('Loading the pretrained model from Imagenet')
         if self.cnn_backbone == 'resnet18':
             model = torchvision.models.resnet18(pretrained=True)
+        elif self.cnn_backbone == 'resnet34':
+            model = torchvision.models.resnet34(pretrained=True)
+        elif self.cnn_backbone == 'resnet50':
+            model = torchvision.models.resnet50(pretrained=True)
+        elif self.cnn_backbone == 'resnet101':
+            model = torchvision.models.resnet101(pretrained=True)
+        elif self.cnn_backbone == 'resnet152':
+            model = torchvision.models.resnet152(pretrained=True)
         else:
-            model = torchvision.models.resnet18(pretrained=True)
+            raise NotImplementedError
         pretrained_dict = model.state_dict()
         model_dict = self.cnn.state_dict()
         pretrained_dict =  {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model_dict.update(pretrained_dict)
         self.cnn.load_state_dict(model_dict)
 
-    def mix_grad(self):
-        '''
-        Mix the gradient from the two cnns
-        '''
-        with torch.no_grad():
-            for (name, param), (name2, param2) in zip(self.cnn1.named_parameters(), self.cnn2.named_parameters()):
-                if param.requires_grad:
-                    param.grad = (param.grad + param2.grad) / 2
-        
-
-    def equai_weights(self):
-        model_dict = self.cnn1.state_dict()
-        self.cnn2.load_state_dict(model_dict)
-
 
 def trainEncoder(args, encoder, trainloader, testloader, device):
     criterion = nn.CrossEntropyLoss()
-    # optimizer = optim.Adam([{'params': encoder.cnn.parameters(), 'lr':args.encoder_lr*0.1}, {
-    #                        'params': encoder.connect.parameters(), 'lr':args.encoder_lr}])
-    # optimizer = optim.Adam([{'params': encoder.connect.parameters()}], lr=args.encoder_lr)
+    mse_crit = nn.MSELoss()
+
     cnn_optimizer = optim.Adam(encoder.cnn.parameters(), lr=args.encoder_lr*0.1)
     connect_optimizer = optim.Adam(encoder.connect.parameters(), lr=args.encoder_lr)
     cnn_optimizer.zero_grad()
@@ -249,15 +244,18 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
         c_train_loss = 0
         cnn_train_loss = 0
         correct = 0
+
+        correct_m1 = 0
+        correct_1 = 0
+        correct_0 = 0
+
         total = 0
         encoder.cnn.train()
         encoder.connect.train()
         for batch_idx, (img1, img2, targets) in enumerate(trainloader):
-            # targets: 0 connect, 1 not connect
+            # targets: 1 connect, 0 not connect (two nodes), -1 not connect (one node)
             targets = targets.to(device)
             _, _, outputs, sim = encoder.predconnectfromimg(img1, img2)
-
-            connect_optimizer.zero_grad()
 
             connect_targets = targets.clone()
             connect_targets[targets==-1] = 0
@@ -268,42 +266,52 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
 
             if sim[targets==-1].shape == torch.Size([0]):
                 c_loss = c_loss_pred.clone()
+                c_loss_cnn = c_loss_pred.clone()
             else:
-                # print(sim[targets == -1])
-                # c_loss_cos = torch.mean(sim[targets==-1].mul(outputs_soft[targets==-1,1])) * args.sim_reg
-                c_loss_cos = torch.mean(outputs_soft[targets == -1, 1].div(sim[targets == -1] + 0.05)) * args.sim_reg
-                c_loss = c_loss_pred + c_loss_cos
+                c_loss_cnn = mse_crit(sim[targets == -1], torch.zeros_like(sim[targets == -1]).to(device)) * args.node_dis_reg + c_loss_pred
+                c_loss = c_loss_pred
+            
+            if sim[targets==1].shape != torch.Size([0]):
+                c_loss_cnn = c_loss_cnn + mse_crit(sim[targets == 1], torch.ones_like(sim[targets == 1]).to(device) * args.max_node_dis) * args.node_dis_reg
 
             c_loss.backward(retain_graph=True)
             connect_optimizer.step()
             connect_optimizer.zero_grad()
 
             cnn_optimizer.zero_grad()
-            
-            # cnn_targets = targets.clone()
-            # cnn_targets[targets==-1] = 0
-            # cnn_loss = criterion(outputs, cnn_targets)
 
-            c_loss_pred.backward()
+            c_loss_cnn.backward()
             cnn_optimizer.step()
             cnn_optimizer.zero_grad()
 
-            c_train_loss += c_loss_cos.item()
-            cnn_train_loss += c_loss_pred.item()
+            connect_optimizer.zero_grad()
+
+            
+            cnn_train_loss += c_loss_cnn.item()
+            c_train_loss += c_loss.item()
             
             total += targets.size(0)
             correct += predicted.eq(connect_targets).sum().item()
 
-            progress_bar(batch_idx, len(trainloader), 'connect loss: %.3f | cnn loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (c_train_loss/(batch_idx+1), cnn_train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+            correct_m1 += predicted[targets == -1].eq(connect_targets[targets == -1]).sum().item()
+            correct_0 += predicted[targets == 0].eq(connect_targets[targets == 0]).sum().item()
+            correct_1 += predicted[targets == 1].eq(connect_targets[targets == 1]).sum().item()
+
+            progress_bar(batch_idx, len(trainloader), 'connect loss: %.3f | cnn loss: %.3f | Acc: %.3f%% (%d/%d) |inc -1:%.2f%% |c: %.2f%% |inc:%.2f%%'
+                         % (c_train_loss/(batch_idx+1), cnn_train_loss/(batch_idx+1), 100.*correct/total, correct, total, 100.*correct_m1/total, 100.*correct_1/total, 100.*correct_0/total))
         
         test_loss = 0
         test_correct = 0
+        test_correct_m1 = 0
+        test_correct_0 = 0
+        test_correct_1 = 0
         test_total = 0
+        encoder.cnn.eval()
+        encoder.connect.eval()
+
         for batch_idx, (img1, img2, targets) in enumerate(testloader):
             targets = targets.to(device)
-            encoder.cnn.eval()
-            encoder.connect.eval()
+            
             with torch.no_grad():
                 _,_,outputs, _ = encoder.predconnectfromimg(img1, img2)
             cnn_targets = targets.clone()
@@ -315,8 +323,12 @@ def trainEncoder(args, encoder, trainloader, testloader, device):
             test_total += targets.size(0)
             test_correct += predicted.eq(cnn_targets).sum().item()
 
-            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (test_loss/(batch_idx+1), 100.*test_correct/test_total, test_correct, test_total))
+            test_correct_m1 += predicted[targets == -1].eq(cnn_targets[targets == -1]).sum().item()
+            test_correct_0 += predicted[targets == 0].eq(cnn_targets[targets == 0]).sum().item()
+            test_correct_1 += predicted[targets == 1].eq(cnn_targets[targets == 1]).sum().item()
+
+            progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d) |inc -1:%.2f%% |c: %.2f%% |inc:%.2f%%'
+                         % (test_loss/(batch_idx+1), 100.*test_correct/test_total, test_correct, test_total, 100.*test_correct_m1/test_total, 100.*test_correct_1/test_total, 100.*test_correct_0/test_total))
 
         if best_accuracy < (test_correct/test_total):
             best_accuracy = (test_correct/test_total)
@@ -331,7 +343,12 @@ def testEncoder(args, encoder, testloader, device):
     test_loss = 0
     test_correct = 0
     test_total = 0
+    test_correct_m1 = 0
+    test_correct_0 = 0
+    test_correct_1 = 0
     criterion = nn.CrossEntropyLoss()
+    encoder.cnn.eval()
+    encoder.connect.eval()
     for batch_idx, (img1, img2, targets) in enumerate(testloader):
         targets = targets.to(device)
         with torch.no_grad():
@@ -344,9 +361,14 @@ def testEncoder(args, encoder, testloader, device):
         _, predicted = outputs.max(1)
         test_total += targets.size(0)
         test_correct += predicted.eq(cnn_targets).sum().item()
+
+        test_correct_m1 += predicted[targets == -1].eq(cnn_targets[targets == -1]).sum().item()
+        test_correct_0 += predicted[targets == 0].eq(cnn_targets[targets == 0]).sum().item()
+        test_correct_1 += predicted[targets == 1].eq(cnn_targets[targets == 1]).sum().item()
+
         progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                      % (test_loss/(batch_idx+1), 100.*test_correct/test_total, test_correct, test_total))
-
+    print("same node:{}%; inconnect node:{}%; connect node:{}%".format(100.*test_correct_m1/test_total, 100.*test_correct_0/test_total, 100.*test_correct_1/test_total))
 
 def main(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

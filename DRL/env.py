@@ -376,7 +376,7 @@ class CarlaEnv(object):
 
         otherlane_intersection = measurements.player_measurements.intersection_otherlane
 
-        return (c > 1e-9) or (sidewalk_intersection > 0.01) or (otherlane_intersection > 0.9), c
+        return (c > 1e-9) or (sidewalk_intersection > 0.01), c
 
 
     def _make_carla_client(self, host, port):

@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import gym
+from DRL.carla.planner.map import CarlaMap
 
 class CameraException(Exception):
 
@@ -16,6 +17,7 @@ class CarlaObservationConverter(object):
         self.c = 3
         self.h = h
         self.w = w
+        self._map = CarlaMap('Town02', 0.1643, 50.0)
         self.rel_coord_system = rel_coord_system
         if self.rel_coord_system:
             self.vbounds = np.array([
@@ -119,9 +121,17 @@ class CarlaObservationConverter(object):
             ])
 
         else:
-            v = np.array([
+            target_position = self._map.convert_to_pixel([
+                target.location.x,
+                target.location.y,
+                target.location.z])
+            player_position = self._map.convert_to_pixel([
                 player_measurements.transform.location.x,
                 player_measurements.transform.location.y,
+                player_measurements.transform.location.z])
+            v = np.array([
+                player_position[0],
+                player_position[1],
                 player_measurements.transform.rotation.yaw,
                 player_measurements.forward_speed,
                 player_measurements.acceleration.x,
@@ -136,8 +146,8 @@ class CarlaObservationConverter(object):
                 player_measurements.collision_other,
                 player_measurements.intersection_otherlane,
                 player_measurements.intersection_offroad,
-                target.location.x,
-                target.location.y,
+                target_position[0],
+                target_position[1],
                 target.rotation.yaw
             ])
 

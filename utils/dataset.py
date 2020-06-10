@@ -52,13 +52,15 @@ class SimulateConstructGraphData(Dataset):
         :param name_path: the path to the txt file
         '''
         self.img_path = img_path
-        self.names = sorted(get_images_list(self.img_path))
+        self.names_raw = sorted(get_images_list(self.img_path))
+        self.names = [self.names_raw[i] for i in range(2, len(self.names_raw), 5)]
 
         self.transform = target_transform
 
     def __getitem__(self, index):
         img_name = self.names[index]
         img = Image.open(os.path.join(self.img_path, img_name))
+        img_name = img_name.split('.')[0]
         heading = img_name.split('_')[1]
         coord_x = float(img_name.split('_')[2])
         coord_y = float(img_name.split('_')[3])

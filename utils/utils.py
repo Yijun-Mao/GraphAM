@@ -45,6 +45,37 @@ def init_params(net):
 def computedistance2points(point1, point2):
     return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
 
+def load_explore_traj(imgpath):
+    if os.path.isdir(imgpath):
+        imgs = []
+        locations = []
+        for name in os.listdir(imgpath):
+            if name.endswith('.png'):
+                imgs.append(name)
+        imgs = sorted(imgs)
+        for i in range(2,len(imgs),5):
+            img  = imgs[i]
+            img = img.split('.')[0]
+            coord_x = float(img.split('_')[2])
+            coord_y = float(img.split('_')[3])
+            locations.append([coord_x, coord_y])
+        return locations
+    else:
+        print("Not valid path")
+        raise IOError
+
+def load_navigation_traj_goal(path):
+    position = []
+    target = []
+    with open(path,'r') as f:
+        for cow in f.readlines():
+            coord = list(map(float, cow.strip().split()))
+            if len(target) == 0:
+                target = [coord[2], coord[3]]
+            position.append([coord[0], coord[1]])
+    return position[:-1], target
+
+
 _, term_width = os.popen('stty size', 'r').read().split()
 term_width = int(term_width)
 

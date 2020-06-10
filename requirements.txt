@@ -1,0 +1,17 @@
+Pillow
+numpy
+protobuf
+pygame
+matplotlib
+future
+tensorboardX
+scikit-video
+pyyaml
+gym
+IPython
+torch >= 1.1.0
+torchvision >= 0.3.0
+opencv-python
+argparse
+
+

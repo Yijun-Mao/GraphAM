@@ -17,8 +17,6 @@ from GAT.models import GAT
 from utils.utils import *
 from DRL.policy import Policy
 
-MEAN = [0.485, 0.456, 0.406]
-STD = [0.229, 0.224, 0.225]
 
 def load_config_file(filename):
     with open(filename, 'r') as f:
@@ -78,6 +76,8 @@ class Navigation(object):
             print('The checkpoints or the constructed graph are not existed!')
 
         self.all_nodes, self.adjacent = self.graph.getgraph(sparse=False)
+        for i in range(len(self.all_nodes)):
+            self.adjacent[i,i] = 1
         self.node_features = None
         self.coords = None
 
@@ -111,17 +111,17 @@ class Navigation(object):
 
         if config.agent == 'ppo':
             self.optimizer = optim.Adam([{'params': self.agent.parameters(), 'lr': self.lr, 'eps': self.config.eps}, {
-                'params': self.gat.parameters(), 'lr': self.lr, 'eps': self.config.eps}])
+                'params': self.gat.parameters(), 'lr': self.lr*0.05, 'eps': self.config.eps}])
             # self.agent_optim = optim.Adam(self.agent.model.parameters(), lr, )
             # self.gat_optim = optim.Adam(self.gat.parameters(), lr, weight_decay=weight_decay)
         elif config.agent == 'a2c':
             self.optimizer = optim.RMSprop([{'params': self.agent.parameters(), 'lr': self.lr, 'eps': self.config.eps, 'alpha': self.config.alpha}, {
-                'params': self.gat.parameters(), 'lr': self.lr, 'eps': self.config.eps, 'alpha': self.config.alpha}])
+                'params': self.gat.parameters(), 'lr': self.lr*0.05, 'eps': self.config.eps, 'alpha': self.config.alpha}])
             # self.agent_optim = optim.RMSprop(self.agent.model.parameters(), lr, eps=eps, alpha=alpha)
         else:
             raise NotImplementedError
 
-    def locateingraph(self, observation, L=1, groundtruth=False):
+    def locateingraph(self, observation, L=10, groundtruth=False):
         '''
         Locate the observation in constructed graph. 
         Pick up top L similar nodes and select the node of median similarity score as the current node.
@@ -141,13 +141,19 @@ class Navigation(object):
                     similarities.append([i, similarity])
                 
                 similarities = sorted(similarities, key=lambda x: x[1], reverse=False)
-                return similarities[L//2][0]
+                node_idx = similarities[L//2][0]
+                if self.coords is not None:
+                    print(self.coords[node_idx])
+                return node_idx
             else:
                 if len(observation.shape)==1:
                     observation = np.expand_dims(observation,axis=0)
                 all_nodes = np.expand_dims(self.all_nodes,axis=1).repeat(observation.shape[0],axis=1) 
                 similarity = np.linalg.norm(all_nodes - observation, ord=2, axis=-1)
-                return np.argmin(similarity, axis=0)
+                node_idx = np.argmin(similarity, axis=0)
+                # if self.coords is not None:
+                #     print(self.coords[node_idx])
+                return node_idx
         else:
             if self.coords is None:
                 coords = np.load(os.path.join(self.args.out_dir, 'min_{}_max_{}'.format(
@@ -184,9 +190,13 @@ class Navigation(object):
         img = inputs['img']
         # img = torch.from_numpy(img)
         target = inputs['v']
+        current = target[:,0:2].cpu().numpy()
         target = target[:,-3:-1].cpu().numpy()
+        # print("target ",target)
+        # print("current ",current)
         observation = self.encoder.getobservefromimg(img)
-        current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
+        # current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
+        current_i = self.locateingraph(current, groundtruth=groundtruth)
         self.node_features = self.aggregatefeature(self.all_nodes, self.adjacent)
         # if updatetarget:
             # target = inputs['v'].astype(np.float)
@@ -207,9 +217,11 @@ class Navigation(object):
         img = inputs['img']
         # img = torch.from_numpy(img)
         target = inputs['v']
+        current = target[:,0:2].cpu().numpy()
         target = target[:,-3:-1].cpu().numpy()
         observation = self.encoder.getobservefromimg(img)
-        current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
+        # current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
+        current_i = self.locateingraph(current, groundtruth=groundtruth)
 
         # if updatetarget:
             # target = inputs['v'].astype(np.float)
@@ -222,7 +234,7 @@ class Navigation(object):
         guide = self.node_features[target_i_value] - self.node_features[current_i]
         return self.agent.get_value(observation, guide)
 
-    def update(self, rollouts, groundtruth=True):
+    def update(self, rollouts, step, groundtruth=True):
         if self.config.agent == 'a2c':
             self.eps_curr = max(0.0, self.eps_curr - self.eps_greedy_decay)
             obs_shape = {k: r.size()[2:] for k, r in rollouts.obs.items()}
@@ -230,16 +242,21 @@ class Navigation(object):
             rollouts_flatten = {}
             for k,r in rollouts.obs.items():
                 r = r[:-1].view(-1, *obs_shape[k])
-                if k == 'v':
-                    r = r[:, -3:-1]
+                # if k == 'v':
+                #     r = r[:, -3:-1]
                 rollouts_flatten[k] = r
                     
             action_shape = rollouts.actions.size()[-1]
             num_steps, num_processes, _ = rollouts.rewards.size()
             observation = self.encoder.getobservefromimg(rollouts_flatten['img'])
-            current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
+            # current_i = self.locateingraph(observation.cpu().detach().numpy(), L=1)
+            _position = rollouts_flatten['v'].cpu().detach().numpy()
+            current_pos = _position[:,0:2]
+            target_pos = _position[:,-3:-1]
+            # self.savePath(current_pos, target_pos, step)
+            current_i = self.locateingraph(current_pos, groundtruth=groundtruth)
 
-            target_i_act = self.locateingraph(rollouts_flatten['v'].cpu().detach().numpy(), groundtruth=groundtruth)
+            target_i_act = self.locateingraph(target_pos, groundtruth=groundtruth)
             
             self.node_features = self.aggregatefeature(self.all_nodes, self.adjacent)
 
@@ -270,21 +287,30 @@ class Navigation(object):
 
             return value_loss.item(), action_loss.item(), dist_entropy.item()
 
+    def savePath(self, current, target, step):
+        if current.shape[0] > 5:
+            print("writing path")
+            with open('./weights/drl_path/step_{}.txt'.format(step), 'w') as f:
+                for i in range(current.shape[0]):
+                    f.write("{} {}\n".format(current[i,0], current[i, 1]))
+                f.write("{} {}".format(target[0,0], target[0, 1]))
 
-    def savemodel(self, path):
+    def savemodel(self, path, step=0):
+        if not os.path.exists(os.path.join(path,'drl')):
+            os.makedirs(os.path.join(path,'drl'))
         print('Storing agent model to: {}'.format(path))
         torch.save({'state_dict': self.agent.state_dict(),
                     'config': dict(self.config._asdict())  # Save as a Python dictionary
-                    }, os.path.join(path, self.config.agent + '_agent.pt'))
+                    }, os.path.join(path, 'drl',  self.config.agent + '_agent_{}.pt'.format(step)))
         
         print('Storing GAT model to: {}'.format(path))
-        torch.save(self.gat.state_dict(), os.path.join(path, self.config.agent + '_GAT.pt'))
+        torch.save(self.gat.state_dict(), os.path.join(path, 'drl', self.config.agent + '_GAT_{}.pt'.format(step)))
         
-    def loadmodel(self, path):
+    def loadmodel(self, path, step):
         print("Loading weights from " + path)
-        checkpoints = torch.load(os.path.join(path, self.config.agent + '_agent.pt'), map_location=lambda storage, loc: storage)
+        checkpoints = torch.load(os.path.join(path, 'drl',  self.config.agent + '_agent_{}.pt'.format(step)), map_location=lambda storage, loc: storage)
         self.agent.load_state_dict(checkpoints['state_dict'])
-        self.gat.load_state_dict(torch.load(os.path.join(path, self.config.agent + '_GAT.pt')))
+        self.gat.load_state_dict(torch.load(os.path.join(path,'drl', self.config.agent + '_GAT_{}.pt'.format(step))))
         
 
 

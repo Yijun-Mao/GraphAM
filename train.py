@@ -124,12 +124,11 @@ def main():
                          video_every=args.video_interval, video_dir=os.path.join(args.save_dir, 'video', experiment_name))
 
     agent = Navigation(args, envs.action_space, config)
-    # if config.agent == 'forward':
-    #     agent = agents.ForwardCarla()
 
 
     if args.load_agent_gat:
-        agent.loadmodel(args.out_dir)
+        agent.loadmodel(args.out_dir, 5000)
+        print("Loading models")
 
     rollouts = RolloutStorage(config.num_steps, config.num_processes,
                               envs.observation_space, envs.action_space, 
@@ -149,6 +148,7 @@ def main():
     total_steps = 0
     total_episodes = 0
     total_reward = 0
+    # write_path = 0
 
     episode_reward = torch.zeros(config.num_processes)
 
@@ -162,6 +162,12 @@ def main():
 
             # Observe reward and next obs
             obs, reward, done, info = envs.step(action)
+            # if write_path% 20 == 0:
+            #     _position = obs['v'][-1].cpu().detach().numpy()
+            #     current_pos = _position[0:2]
+            #     target_pos = _position[-3:-1]
+            #     with open('./weights/drl_path/step_{}.txt'.format(write_path), 'a') as f:
+            #         f.write("{} {} {} {}\n".format(current_pos[0], current_pos[1], target_pos[0], target_pos[1]))
 
             # For logging purposes
             carla_rewards = torch.tensor(
@@ -171,6 +177,7 @@ def main():
             total_steps += config.num_processes
 
             if done.any():
+                # write_path += 1
                 total_episodes += done.sum()
                 torch_done = torch.tensor(done.astype(int)).byte()
                 mean_episode_reward = episode_reward[torch_done].mean().item()
@@ -197,14 +204,14 @@ def main():
         rollouts.compute_returns(
             next_value, config.use_gae, config.gamma, config.tau)
 
-        value_loss, action_loss, dist_entropy = agent.update(rollouts)
+        value_loss, action_loss, dist_entropy = agent.update(rollouts, j)
 
         rollouts.after_update()
 
         if j % args.save_interval == 0 and args.out_dir != "" and config.agent != 'forward':
             # save_path = os.path.join(save_dir_model, str(j) + '.pth.tar')
             # save_modules(agent.optimizer, agent.model, args, config, save_path)
-            agent.savemodel(args.out_dir)
+            agent.savemodel(args.out_dir, j)
 
         total_num_steps = (j + 1) * config.num_processes * config.num_steps
 
