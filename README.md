@@ -1,3 +1,22 @@
+## Prerequisites
+- Python 3.5
+- PyTorch 1.1.0
+- Torchvision 0.3.0
+- numpy
+- opencv-python
+- matplotlib
+- Pillow
+- gym
+- IPython
+- pyyaml
+- pygame
+- protobuf
+- future
+- tensorboardX
+- scikit-video
+
+
+## Getting started
 ### Collect raw data
 First you should collect the images in CARLA. Here we manually controled the agent to collect the images.
 Before running the code, a CARLA server should be started. Then you can run 
