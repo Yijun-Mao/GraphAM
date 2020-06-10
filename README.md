@@ -4,7 +4,8 @@ Before running the code, a CARLA server should be started. Then you can run
 ```
 python utils/manual_control_collectdata0.8.2.py
 ```
-It would automatically record the images with corresponding position in the map in './dataset/carla_rawdata/' <br>
+It would automatically record the images with corresponding position in the map in `./dataset/carla_rawdata/`. <br>
+The size of the saved images is `800x600`. <br>
 
 
 ### Train the networks
@@ -12,13 +13,13 @@ To train the CNN encoder and connect-predict-network, run
 ```
 python Encoder/cnn.py
 ```
-The configurations are in 'config.py' and you may carefully check the settings before running.
+The configurations are in `config.py` and you may carefully check the settings before running.
 If it is the first time to run, the dataset would be automatically made from the raw data. <br>
 
 
 ### Construct the topological map
 After the networks are trained, the topological map can be constructed. 
-To construct the topological map, you should specify the path of images that were collected when exploring the map by modifying '--path_images'.
+To construct the topological map, you should specify the path of images that were collected when exploring the map by modifying `--path_images`.
 Run 
 ```
 python Encoder/ConstrucGraph.py
@@ -31,4 +32,4 @@ The CARLA server should be started af first. Then you can run
 ```
 python train.py
 ```
-
+Now we only implemented A2C. The corresponding network structures are defined in `./DRL/policy.py`. <br>
