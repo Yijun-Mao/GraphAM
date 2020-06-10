@@ -1,7 +1,9 @@
 ### Collect raw data
 First you should collect the images in CARLA. Here we manually controled the agent to collect the images.
-Before running the code, a CARLA server should be started. Then you can run <br>
-'python utils/manual_control_collectdata0.8.2.py' <br>
+Before running the code, a CARLA server should be started. Then you can run 
+```
+python utils/manual_control_collectdata0.8.2.py
+```
 It would automatically record the images with corresponding position in the map in './dataset/carla_rawdata/' <br>
 
 
@@ -29,4 +31,4 @@ The CARLA server should be started af first. Then you can run
 ```
 python train.py
 ```
-The 
+
